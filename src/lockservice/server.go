@@ -32,9 +32,13 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
   ls.mu.Lock()
   defer ls.mu.Unlock()
 
-
   locked, _ := ls.locks[args.Lockname]
-
+  
+  if ls.am_primary {
+    var re LockReply
+    call(ls.backup, "LockServer.Lock", args, &re)
+  }
+  
   if locked {
     reply.OK = false
   } else {
@@ -49,8 +53,22 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 // server Unlock RPC handler.
 //
 func (ls *LockServer) Unlock(args *UnlockArgs, reply *UnlockReply) error {
-
-  // Your code here.
+  ls.mu.Lock()
+  defer ls.mu.Unlock()
+  
+  locked, _ := ls.locks[args.Lockname]
+  
+  if ls.am_primary {
+    var re LockReply
+    call(ls.backup, "LockServer.Unlock", args, &re)
+  }
+  
+  if locked {
+    reply.OK = true
+    ls.locks[args.Lockname] = false
+  } else {
+    reply.OK = false
+  }
 
   return nil
 }

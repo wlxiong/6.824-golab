@@ -1,6 +1,7 @@
 package lockservice
 
 import "net/rpc"
+// import "fmt"
 
 //
 // the lockservice Clerk lives in the client
@@ -66,11 +67,19 @@ func (ck *Clerk) Lock(lockname string) bool {
   
   // send an RPC request, wait for the reply.
   ok := call(ck.servers[0], "LockServer.Lock", args, &reply)
-  if ok == false {
-    return false
+  // fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
+  if ok == true {
+    return reply.OK
+  } else {
+    var reply1 LockReply
+    ok = call(ck.servers[1], "LockServer.Lock", args, &reply1)
+    // fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
+    if ok == true {
+      return reply1.OK
+    }
   }
   
-  return reply.OK
+  return false
 }
 
 
@@ -81,8 +90,22 @@ func (ck *Clerk) Lock(lockname string) bool {
 //
 
 func (ck *Clerk) Unlock(lockname string) bool {
-
-  // Your code here.
+  args := &UnlockArgs{}
+  args.Lockname = lockname
+  var reply UnlockReply
+  
+  ok := call(ck.servers[0], "LockServer.Unlock", args, &reply)
+  // fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
+  if ok == true {
+    return reply.OK
+  } else {
+    var reply1 LockReply
+    ok = call(ck.servers[1], "LockServer.Unlock", args, &reply1)
+    // fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
+    if ok == true {
+      return reply1.OK
+    }
+  }
 
   return false
 }
