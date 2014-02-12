@@ -121,8 +121,8 @@ func TestPrimaryFail2(t *testing.T) {
   tl(t, ck1, "a", true)
   tl(t, ck1, "b", true)
 
-  p.kill()
-  
+  p.dying = true
+
   tl(t, ck2, "c", true)
   tl(t, ck1, "c", false)
   tu(t, ck2, "c", true)
@@ -146,7 +146,7 @@ func TestPrimaryFail3(t *testing.T) {
   tl(t, ck1, "a", true)
   tl(t, ck1, "b", true)
 
-  p.kill()
+  p.dying = true
 
   tl(t, ck1, "b", false)
 
@@ -169,7 +169,7 @@ func TestPrimaryFail4(t *testing.T) {
   tl(t, ck1, "a", true)
   tl(t, ck1, "b", true)
 
-  p.kill()
+  p.dying = true
 
   tl(t, ck2, "b", false)
 
@@ -193,7 +193,7 @@ func TestPrimaryFail5(t *testing.T) {
   tl(t, ck1, "b", true)
   tu(t, ck1, "b", true)
 
-  p.kill()
+  p.dying = true
 
   tu(t, ck1, "b", false)
   tl(t, ck2, "b", true)
@@ -219,7 +219,7 @@ func TestPrimaryFail6(t *testing.T) {
   tu(t, ck2, "a", false)
   tl(t, ck1, "b", true)
 
-  p.kill()
+  p.dying = true
 
   tu(t, ck2, "b", true)
   tl(t, ck1, "b", true)
@@ -245,7 +245,7 @@ func TestPrimaryFail7(t *testing.T) {
   tu(t, ck2, "a", false)
   tl(t, ck1, "b", true)
 
-  p.kill()
+  p.dying = true
 
   ch := make(chan bool)
   go func() {
@@ -283,7 +283,7 @@ func TestPrimaryFail8(t *testing.T) {
   tl(t, ck1, "a", true)
   tu(t, ck1, "a", true)
 
-  p.kill()
+  p.dying = true
 
   ch := make(chan bool)
   go func() {
