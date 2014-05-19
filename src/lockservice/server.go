@@ -10,18 +10,17 @@ import "io"
 import "time"
 
 type LockServer struct {
-  mu sync.Mutex
-  l net.Listener
-  dead bool  // for test_test.go
+  mu    sync.Mutex
+  l     net.Listener
+  dead  bool // for test_test.go
   dying bool // for test_test.go
 
-  am_primary bool // am I the primary?
-  backup string   // backup's port
+  am_primary bool   // am I the primary?
+  backup     string // backup's port
 
   // for each lock name, is it locked?
   locks map[string]bool
 }
-
 
 //
 // server Lock RPC handler.
@@ -33,17 +32,17 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
   defer ls.mu.Unlock()
 
   locked, _ := ls.locks[args.Lockname]
-  
-  if ls.am_primary {
-    var re LockReply
-    call(ls.backup, "LockServer.Lock", args, &re)
-  }
-  
+
   if locked {
     reply.OK = false
   } else {
     reply.OK = true
     ls.locks[args.Lockname] = true
+
+    if ls.am_primary {
+      var re LockReply
+      call(ls.backup, "LockServer.Lock", args, &re)
+    }
   }
 
   return nil
@@ -55,17 +54,17 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 func (ls *LockServer) Unlock(args *UnlockArgs, reply *UnlockReply) error {
   ls.mu.Lock()
   defer ls.mu.Unlock()
-  
+
   locked, _ := ls.locks[args.Lockname]
-  
-  if ls.am_primary {
-    var re LockReply
-    call(ls.backup, "LockServer.Unlock", args, &re)
-  }
-  
+
   if locked {
     reply.OK = true
     ls.locks[args.Lockname] = false
+
+    if ls.am_primary {
+      var re LockReply
+      call(ls.backup, "LockServer.Unlock", args, &re)
+    }
   } else {
     reply.OK = false
   }
@@ -93,6 +92,7 @@ func (ls *LockServer) kill() {
 type DeafConn struct {
   c io.ReadWriteCloser
 }
+
 func (dc DeafConn) Write(p []byte) (n int, err error) {
   return len(p), nil
 }
@@ -111,7 +111,6 @@ func StartServer(primary string, backup string, am_primary bool) *LockServer {
 
   // Your initialization code here.
 
-
   me := ""
   if am_primary {
     me = primary
@@ -126,9 +125,9 @@ func StartServer(primary string, backup string, am_primary bool) *LockServer {
   // prepare to receive connections from clients.
   // change "unix" to "tcp" to use over a network.
   os.Remove(me) // only needed for "unix"
-  l, e := net.Listen("unix", me);
+  l, e := net.Listen("unix", me)
   if e != nil {
-    log.Fatal("listen error: ", e);
+    log.Fatal("listen error: ", e)
   }
   ls.l = l
 
@@ -154,7 +153,7 @@ func StartServer(primary string, backup string, am_primary bool) *LockServer {
 
           // this object has the type ServeConn expects,
           // but discards writes (i.e. discards the RPC reply).
-          deaf_conn := DeafConn{c : conn}
+          deaf_conn := DeafConn{c: conn}
 
           rpcs.ServeConn(deaf_conn)
 
