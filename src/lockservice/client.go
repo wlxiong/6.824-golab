@@ -1,24 +1,26 @@
 package lockservice
 
 import "net/rpc"
-// import "fmt"
+import "time"
+import "fmt"
 
 //
 // the lockservice Clerk lives in the client
 // and maintains a little state.
 //
 type Clerk struct {
-  servers [2]string // primary port, backup port
-  // Your definitions here.
+	servers [2]string // primary port, backup port
+	// Your definitions here.
+	locks map[string]int64
 }
 
-
 func MakeClerk(primary string, backup string) *Clerk {
-  ck := new(Clerk)
-  ck.servers[0] = primary
-  ck.servers[1] = backup
-  // Your initialization code here.
-  return ck
+	ck := new(Clerk)
+	ck.servers[0] = primary
+	ck.servers[1] = backup
+	// Your initialization code here.
+	ck.locks = make(map[string]int64)
+	return ck
 }
 
 //
@@ -38,18 +40,18 @@ func MakeClerk(primary string, backup string) *Clerk {
 // please don't change this function.
 //
 func call(srv string, rpcname string,
-          args interface{}, reply interface{}) bool {
-  c, errx := rpc.Dial("unix", srv)
-  if errx != nil {
-    return false
-  }
-  defer c.Close()
-    
-  err := c.Call(rpcname, args, reply)
-  if err == nil {
-    return true
-  }
-  return false
+	args interface{}, reply interface{}) bool {
+	c, errx := rpc.Dial("unix", srv)
+	if errx != nil {
+		return false
+	}
+	defer c.Close()
+
+	err := c.Call(rpcname, args, reply)
+	if err == nil {
+		return true
+	}
+	return false
 }
 
 //
@@ -60,28 +62,32 @@ func call(srv string, rpcname string,
 // you will have to modify this function.
 //
 func (ck *Clerk) Lock(lockname string) bool {
-  // prepare the arguments.
-  args := &LockArgs{}
-  args.Lockname = lockname
-  var reply LockReply
-  
-  // send an RPC request, wait for the reply.
-  ok := call(ck.servers[0], "LockServer.Lock", args, &reply)
-  // fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
-  if ok == true {
-    return reply.OK
-  } else {
-    var reply1 LockReply
-    ok = call(ck.servers[1], "LockServer.Lock", args, &reply1)
-    // fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
-    if ok == true {
-      return reply1.OK
-    }
-  }
-  
-  return false
-}
+	// prepare the arguments.
+	args := &LockArgs{}
+	args.Lockname = lockname
+	args.LockValue = time.Now().UnixNano()
+	var reply LockReply
 
+	// send an RPC request, wait for the reply.
+	fmt.Println("0 Lock", args)
+	ok := call(ck.servers[0], "LockServer.Lock", args, &reply)
+	fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
+	if ok == true {
+		ck.locks[args.Lockname] = args.LockValue
+		return reply.OK
+	} else {
+		var reply1 LockReply
+		fmt.Println("1 Lock", args)
+		ok = call(ck.servers[1], "LockServer.Lock", args, &reply1)
+		fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
+		if ok == true {
+			ck.locks[args.Lockname] = args.LockValue
+			return reply1.OK
+		}
+	}
+
+	return false
+}
 
 //
 // ask the lock service to unlock a lock.
@@ -90,22 +96,27 @@ func (ck *Clerk) Lock(lockname string) bool {
 //
 
 func (ck *Clerk) Unlock(lockname string) bool {
-  args := &UnlockArgs{}
-  args.Lockname = lockname
-  var reply UnlockReply
-  
-  ok := call(ck.servers[0], "LockServer.Unlock", args, &reply)
-  // fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
-  if ok == true {
-    return reply.OK
-  } else {
-    var reply1 LockReply
-    ok = call(ck.servers[1], "LockServer.Unlock", args, &reply1)
-    // fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
-    if ok == true {
-      return reply1.OK
-    }
-  }
+	args := &UnlockArgs{}
+	args.Lockname = lockname
+	args.LockValue = -time.Now().UnixNano()
+	var reply UnlockReply
 
-  return false
+	fmt.Println("0 Unlock", args)
+	ok := call(ck.servers[0], "LockServer.Unlock", args, &reply)
+	fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
+	if ok == true {
+		ck.locks[args.Lockname] = args.LockValue
+		return reply.OK
+	} else {
+		var reply1 LockReply
+		fmt.Println("1 Unlock", args)
+		ok = call(ck.servers[1], "LockServer.Unlock", args, &reply1)
+		fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
+		if ok == true {
+			ck.locks[args.Lockname] = args.LockValue
+			return reply1.OK
+		}
+	}
+
+	return false
 }
