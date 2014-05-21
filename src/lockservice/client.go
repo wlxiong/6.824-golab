@@ -2,7 +2,7 @@ package lockservice
 
 import "net/rpc"
 import "time"
-import "fmt"
+// import "fmt"
 
 //
 // the lockservice Clerk lives in the client
@@ -69,17 +69,17 @@ func (ck *Clerk) Lock(lockname string) bool {
 	var reply LockReply
 
 	// send an RPC request, wait for the reply.
-	fmt.Println("0 Lock", args)
+  // fmt.Println("0 Lock", args)
 	ok := call(ck.servers[0], "LockServer.Lock", args, &reply)
-	fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
+  // fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
 	if ok == true {
 		ck.locks[args.Lockname] = args.LockValue
 		return reply.OK
 	} else {
 		var reply1 LockReply
-		fmt.Println("1 Lock", args)
+    // fmt.Println("1 Lock", args)
 		ok = call(ck.servers[1], "LockServer.Lock", args, &reply1)
-		fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
+    // fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
 		if ok == true {
 			ck.locks[args.Lockname] = args.LockValue
 			return reply1.OK
@@ -101,17 +101,17 @@ func (ck *Clerk) Unlock(lockname string) bool {
 	args.LockValue = -time.Now().UnixNano()
 	var reply UnlockReply
 
-	fmt.Println("0 Unlock", args)
+  // fmt.Println("0 Unlock", args)
 	ok := call(ck.servers[0], "LockServer.Unlock", args, &reply)
-	fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
+  // fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
 	if ok == true {
 		ck.locks[args.Lockname] = args.LockValue
 		return reply.OK
 	} else {
 		var reply1 LockReply
-		fmt.Println("1 Unlock", args)
+    // fmt.Println("1 Unlock", args)
 		ok = call(ck.servers[1], "LockServer.Unlock", args, &reply1)
-		fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
+    // fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
 		if ok == true {
 			ck.locks[args.Lockname] = args.LockValue
 			return reply1.OK
