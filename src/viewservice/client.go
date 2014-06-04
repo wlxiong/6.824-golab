@@ -91,7 +91,7 @@ func (ck *Clerk) Get() (View, bool) {
   // }
   // fmt.Printf("Client Get p: %s, b: %s, num: %d\n", 
   //            reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
-  // return reply.View, true
+  return reply.View, true
 }
 
 func (ck *Clerk) Primary() string {
