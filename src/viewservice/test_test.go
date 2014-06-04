@@ -182,7 +182,7 @@ func Test1(t *testing.T) {
     vx, _ := ck1.Get()
     for i := 0; i < DeadPings * 3; i++ {
       ck1.Ping(0)
-      ck3.Ping(vx.Viewnum)
+      ck3.Ping(vx.Viewnum + 1)
       v, _ := ck1.Get()
       if v.Viewnum > vx.Viewnum {
         break

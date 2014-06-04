@@ -73,6 +73,7 @@ type PingReply struct {
 //
 
 type GetArgs struct {
+  Me string
 }
 
 type GetReply struct {

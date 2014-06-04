@@ -14,17 +14,61 @@ type ViewServer struct {
   dead bool
   me string
 
-
   // Your declarations here.
+  current, pending View
+  lastPingTime map[string]time.Time
+  lastPingViewnum map[string]uint
+  primary_ack bool
+  idle_server string
 }
 
 //
 // server Ping RPC handler.
 //
 func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
+  vs.mu.Lock()
+  defer vs.mu.Unlock()
 
-  // Your code here.
-
+  // update heartbeat stats
+  vs.lastPingTime[args.Me] = time.Now()
+  vs.lastPingViewnum[args.Me] = args.Viewnum
+  // update view after acknowledge
+  if args.Me == vs.pending.Primary && args.Viewnum == vs.pending.Viewnum {
+    vs.current = vs.pending
+  }
+  // initialize view
+  if args.Me != vs.pending.Primary && args.Me != vs.pending.Backup {
+    vs.idle_server = args.Me
+  }
+  if vs.pending.Primary == "" {
+    if vs.idle_server != "" {
+      vs.pending.Primary = vs.idle_server
+      vs.pending.Viewnum = vs.current.Viewnum + 1
+      vs.idle_server = ""
+    }
+  }
+  if vs.pending.Backup == "" {
+    if vs.idle_server != "" {
+      vs.pending.Backup = vs.idle_server
+      vs.pending.Viewnum = vs.current.Viewnum + 1
+      vs.idle_server = ""
+    }
+  }
+  // replace primary/backup server
+  if args.Me == vs.current.Primary && args.Viewnum < vs.current.Viewnum {
+    vs.replace_primary()
+  }
+  if args.Me == vs.current.Backup && args.Viewnum < vs.current.Viewnum {
+    vs.replace_backup()
+  }
+  // send view
+  if args.Me == vs.pending.Primary {
+    reply.View = vs.pending
+  } else {
+    reply.View = vs.current
+  }
+  // fmt.Printf("Server Ping p: %s, b: %s, num: %d\n", 
+  //            reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
   return nil
 }
 
@@ -32,12 +76,36 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 // server Get() RPC handler.
 //
 func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
-
-  // Your code here.
-
+  if args.Me == vs.pending.Primary {
+    reply.View = vs.pending
+  } else {
+    reply.View = vs.current
+  }
+  // fmt.Printf("Server Get p: %s, b: %s, num: %d\n", 
+  //          reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
   return nil
 }
 
+func (vs *ViewServer) replace_primary() {
+  vs.pending.Primary = vs.current.Backup
+  if vs.idle_server != "" {
+    vs.pending.Backup = vs.idle_server
+    vs.idle_server = ""
+  } else {
+    vs.pending.Backup = ""
+  }
+  vs.pending.Viewnum = vs.current.Viewnum + 1
+}
+
+func (vs *ViewServer) replace_backup() {
+  if vs.idle_server != "" {
+    vs.pending.Backup = vs.idle_server
+    vs.idle_server = ""
+  } else {
+    vs.pending.Backup = ""
+  }
+  vs.pending.Viewnum = vs.current.Viewnum + 1
+}
 
 //
 // tick() is called once per PingInterval; it should notice
@@ -45,8 +113,23 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 // accordingly.
 //
 func (vs *ViewServer) tick() {
+  vs.mu.Lock()
+  defer vs.mu.Unlock()
 
-  // Your code here.
+  now := time.Now()
+
+  for server, pingTime := range vs.lastPingTime {
+    if now.Sub(pingTime) > PingInterval * DeadPings {
+      delete(vs.lastPingTime, server)
+      delete(vs.lastPingViewnum, server)
+      if server == vs.current.Primary {
+        vs.replace_primary()
+      }
+      if server == vs.current.Backup {
+        vs.replace_backup()
+      }
+    }
+  }
 }
 
 //
@@ -63,6 +146,8 @@ func StartServer(me string) *ViewServer {
   vs := new(ViewServer)
   vs.me = me
   // Your vs.* initializations here.
+  vs.lastPingTime = make(map[string]time.Time)
+  vs.lastPingViewnum = make(map[string]uint)
 
   // tell net/rpc about our RPC server and handlers.
   rpcs := rpc.NewServer()
