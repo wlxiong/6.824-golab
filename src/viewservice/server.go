@@ -33,11 +33,13 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
   vs.lastPingTime[args.Me] = time.Now()
   vs.lastPingViewnum[args.Me] = args.Viewnum
   // update view after acknowledge
-  if args.Me == vs.pending.Primary && args.Viewnum == vs.pending.Viewnum {
+  if args.Me == vs.pending.Primary &&
+     args.Viewnum == vs.pending.Viewnum {
     vs.current = vs.pending
   }
   // initialize view
-  if args.Me != vs.pending.Primary && args.Me != vs.pending.Backup {
+  if args.Me != vs.pending.Primary &&
+     args.Me != vs.pending.Backup {
     vs.idle_server = args.Me
   }
   if vs.pending.Primary == "" {
@@ -55,10 +57,12 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
     }
   }
   // replace primary/backup server
-  if args.Me == vs.current.Primary && args.Viewnum < vs.current.Viewnum {
+  if args.Me == vs.current.Primary &&
+     args.Viewnum < vs.current.Viewnum {
     vs.replace_primary()
   }
-  if args.Me == vs.current.Backup && args.Viewnum < vs.current.Viewnum {
+  if args.Me == vs.current.Backup &&
+     args.Viewnum < vs.current.Viewnum {
     vs.replace_backup()
   }
   // send view

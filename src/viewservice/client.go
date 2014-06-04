@@ -62,15 +62,15 @@ func (ck *Clerk) Ping(viewnum uint) (View, error) {
   if ok == false {
     return View{}, fmt.Errorf("Ping(%v) failed", viewnum)
   }
-  if ck.me == reply.View.Primary {
-    fmt.Printf("Client Primary: %s\n", ck.me)
-  } else if ck.me == reply.View.Backup {
-    fmt.Printf("Client Backup: %s\n", ck.me)
-  } else {
-    fmt.Printf("Client Idle: %s\n", ck.me)
-  }
-  fmt.Printf("Client Ping p: %s, b: %s, num: %d\n", 
-             reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
+  // if ck.me == reply.View.Primary {
+  //   fmt.Printf("Client Primary: %s\n", ck.me)
+  // } else if ck.me == reply.View.Backup {
+  //   fmt.Printf("Client Backup: %s\n", ck.me)
+  // } else {
+  //   fmt.Printf("Client Idle: %s\n", ck.me)
+  // }
+  // fmt.Printf("Client Ping p: %s, b: %s, num: %d\n", 
+  //            reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
   return reply.View, nil
 }
 
@@ -82,16 +82,16 @@ func (ck *Clerk) Get() (View, bool) {
   if ok == false {
     return View{}, false
   }
-  if ck.me == reply.View.Primary {
-    fmt.Printf("Client Primary: %s\n", ck.me)
-  } else if ck.me == reply.View.Backup {
-    fmt.Printf("Client Backup: %s\n", ck.me)
-  } else {
-    fmt.Printf("Client Idle: %s\n", ck.me)
-  }
-  fmt.Printf("Client Get p: %s, b: %s, num: %d\n", 
-             reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
-  return reply.View, true
+  // if ck.me == reply.View.Primary {
+  //   fmt.Printf("Client Primary: %s\n", ck.me)
+  // } else if ck.me == reply.View.Backup {
+  //   fmt.Printf("Client Backup: %s\n", ck.me)
+  // } else {
+  //   fmt.Printf("Client Idle: %s\n", ck.me)
+  // }
+  // fmt.Printf("Client Get p: %s, b: %s, num: %d\n", 
+  //            reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
+  // return reply.View, true
 }
 
 func (ck *Clerk) Primary() string {
