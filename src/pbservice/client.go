@@ -1,6 +1,6 @@
 package pbservice
 
-import "github.com/wlxiong/6.824-golab/viewservice"
+import "viewservice"
 import "net/rpc"
 // You'll probably need to uncomment this:
 import "time"
