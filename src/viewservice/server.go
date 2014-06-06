@@ -108,7 +108,7 @@ func (vs *ViewServer) replace_backup() {
   } else {
     vs.pending.Backup = ""
   }
-  vs.pending.Viewnum = vs.current.Viewnum + 1
+  vs.pending.Viewnum = vs.current.Viewnum
 }
 
 //
