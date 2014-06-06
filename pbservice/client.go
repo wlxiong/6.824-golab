@@ -1,6 +1,6 @@
 package pbservice
 
-import "viewservice"
+import "github.com/wlxiong/6.824-golab/viewservice"
 import "net/rpc"
 // You'll probably need to uncomment this:
 import "time"
@@ -86,7 +86,7 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) Put(key string, value string) {
   for true {
-    view, ok := ck.vs.Get();
+    view, ok := ck.vs.Get()
     if !ok {
       continue
     }

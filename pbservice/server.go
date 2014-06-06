@@ -1,11 +1,11 @@
 package pbservice
 
+import "github.com/wlxiong/6.824-golab/viewservice"
 import "net"
 import "fmt"
 import "net/rpc"
 import "log"
 import "time"
-import "git"
 import "sync"
 import "os"
 import "syscall"
