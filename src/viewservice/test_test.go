@@ -67,9 +67,12 @@ func Test1(t *testing.T) {
 
   {
     vx, _ := ck1.Get()
+		// vs.Viewnum = 1
     for i := 0; i < DeadPings * 2; i++ {
       ck1.Ping(1)
+			// current viewnum: 1
       view, _ := ck2.Ping(0)
+			// pending viewnum: 2
       if view.Backup == ck2.me {
         break
       }
@@ -84,10 +87,15 @@ func Test1(t *testing.T) {
 
   {
     ck1.Ping(2)
+		// current view = 2, p: ck1, b: ck2
     vx, _ := ck2.Ping(2)
+		// vx.Viewnum = 2
     for i := 0; i < DeadPings * 2; i++ {
       v, _ := ck2.Ping(vx.Viewnum)
+			// v.Viewnum = 2, p: ck2, b: ck1
       if v.Primary == ck2.me && v.Backup == "" {
+				// v.Viewnum = 3, p: ck2, b: ""
+				// if a backup becomes primary, viewnum increases by one
         break
       }
       time.Sleep(PingInterval)
@@ -101,10 +109,12 @@ func Test1(t *testing.T) {
 
   {
     vx, _ := ck2.Get()
+		// vx.Viewnum = 3, p: ck2, b: ""
     ck2.Ping(vx.Viewnum)
     for i := 0; i < DeadPings * 2; i++ {
       ck1.Ping(0)
       v, _ := ck2.Ping(vx.Viewnum)
+			// v.Viewnum = 4, p: ck2, b: ck1
       if v.Primary == ck2.me && v.Backup == ck1.me {
         break
       }
@@ -120,10 +130,12 @@ func Test1(t *testing.T) {
 
   {
     vx, _ := ck2.Get()
+		// vx.Viewnum = 4, p: ck2, b: ck1
     ck2.Ping(vx.Viewnum)
     for i := 0; i < DeadPings * 2; i++ {
       ck3.Ping(0)
       v, _ := ck1.Ping(vx.Viewnum)
+			// v.Viewnum = 5, p: ck1, b: ck3
       if v.Primary == ck1.me && v.Backup == ck3.me {
         break;
       }
@@ -140,12 +152,14 @@ func Test1(t *testing.T) {
 
   {
     vx, _ := ck1.Get()
+		// vx.Viewnum = 5, p: ck1, b: ck3
     ck1.Ping(vx.Viewnum)
     for i := 0; i < DeadPings * 2; i++ {
       ck1.Ping(0)
       ck3.Ping(vx.Viewnum)
       v, _ := ck3.Get()
       if v.Primary != ck1.me {
+				// v.Viewnum = 6, p: ck3, b: ""
         break
       }
       time.Sleep(PingInterval)
@@ -180,17 +194,21 @@ func Test1(t *testing.T) {
     // set up p=ck3 b=ck1, but
     // but do not ack
     vx, _ := ck1.Get()
+		// vx.Viewnum = 6, p: ck3, b: ""
     for i := 0; i < DeadPings * 3; i++ {
       ck1.Ping(0)
       ck3.Ping(vx.Viewnum)
       v, _ := ck1.Get()
       if v.Viewnum > vx.Viewnum {
+				fmt.Printf("new viewnum\n")
         break
       }
       time.Sleep(PingInterval)
     }
+		fmt.Printf("ck3.me: %s, ck1.me: %s\n", ck3.me, ck1.me)
     check(t, ck1, ck3.me, ck1.me, vx.Viewnum+1)
     vy, _ := ck1.Get()
+		fmt.Printf("p: %s, b: %s\n", vy.Primary, vy.Backup)
     // ck3 is the primary, but it never acked.
     // let ck3 die. check that ck1 is not promoted.
     for i := 0; i < DeadPings * 3; i++ {

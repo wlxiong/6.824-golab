@@ -37,11 +37,12 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
      args.Viewnum == vs.pending.Viewnum {
     vs.current = vs.pending
   }
-  // initialize view
+  // add an idle server
   if args.Me != vs.pending.Primary &&
      args.Me != vs.pending.Backup {
     vs.idle_server = args.Me
   }
+	// add the first primary server
   if vs.pending.Primary == "" {
     if vs.idle_server != "" {
       vs.pending.Primary = vs.idle_server
@@ -49,14 +50,11 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
       vs.idle_server = ""
     }
   }
+	// add a backup server
   if vs.pending.Backup == "" {
-    if vs.idle_server != "" {
-      vs.pending.Backup = vs.idle_server
-      vs.pending.Viewnum = vs.current.Viewnum + 1
-      vs.idle_server = ""
-    }
+		vs.replace_backup()
   }
-  // replace primary/backup server
+  // replace primary/backup server if it restarts
   if args.Me == vs.current.Primary &&
      args.Viewnum < vs.current.Viewnum {
     vs.replace_primary()
@@ -108,7 +106,7 @@ func (vs *ViewServer) replace_backup() {
   } else {
     vs.pending.Backup = ""
   }
-  vs.pending.Viewnum = vs.current.Viewnum
+  vs.pending.Viewnum = vs.current.Viewnum + 1
 }
 
 //
