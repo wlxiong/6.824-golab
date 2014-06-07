@@ -74,10 +74,14 @@ func Test1(t *testing.T) {
       view, _ := ck2.Ping(0)
 			// pending viewnum: 2
       if view.Backup == ck2.me {
+				fmt.Printf("new backup: %s\n", ck2.me)
         break
       }
       time.Sleep(PingInterval)
     }
+		v, _ := ck1.Get()
+		fmt.Printf("p: %s, b: %s, Viewnum: %d\n", v.Primary, v.Backup, v.Viewnum)
+		fmt.Printf("ck1: %s, ck2: %s, vx.Viewnum: %d\n", ck1.me, ck2.me, vx.Viewnum)
     check(t, ck1, ck1.me, ck2.me, vx.Viewnum + 1)
   }
   fmt.Printf("  ... Passed\n")
@@ -214,6 +218,7 @@ func Test1(t *testing.T) {
     for i := 0; i < DeadPings * 3; i++ {
       v, _ := ck1.Ping(vy.Viewnum)
       if v.Viewnum > vy.Viewnum {
+				fmt.Printf("error: viewnum advanced without ackknowledge\n")
         break
       }
       time.Sleep(PingInterval)

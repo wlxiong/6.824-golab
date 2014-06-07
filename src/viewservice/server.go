@@ -15,11 +15,21 @@ type ViewServer struct {
   me string
 
   // Your declarations here.
-  current, pending View
+  current View
   lastPingTime map[string]time.Time
   lastPingViewnum map[string]uint
-  primary_ack bool
+  acked_viewnum uint
   idle_server string
+}
+
+func (vs *ViewServer) update_viewnum() {
+	vs.current.Viewnum = vs.current.Viewnum + 1
+}
+
+func (vs *ViewServer) current_view() View {
+	fmt.Printf("reply> p: %s, b: %s, viewnum: %d\n",
+		vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
+	return vs.current
 }
 
 //
@@ -29,48 +39,43 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
   vs.mu.Lock()
   defer vs.mu.Unlock()
 
+	fmt.Printf("args> %s: , viewnum: %d, \n",  args.Me, args.Viewnum)
+
   // update heartbeat stats
   vs.lastPingTime[args.Me] = time.Now()
   vs.lastPingViewnum[args.Me] = args.Viewnum
-  // update view after acknowledge
-  if args.Me == vs.pending.Primary &&
-     args.Viewnum == vs.pending.Viewnum {
-    vs.current = vs.pending
-  }
   // add an idle server
-  if args.Me != vs.pending.Primary &&
-     args.Me != vs.pending.Backup {
+  if args.Me != vs.current.Primary &&
+     args.Me != vs.current.Backup {
     vs.idle_server = args.Me
   }
-	// add the first primary server
-  if vs.pending.Primary == "" {
-    if vs.idle_server != "" {
-      vs.pending.Primary = vs.idle_server
-      vs.pending.Viewnum = vs.current.Viewnum + 1
-      vs.idle_server = ""
+
+  if vs.current.Primary == "" {
+		// add the first primary server
+		if vs.idle_server != "" {
+      vs.current.Primary = vs.idle_server
+			vs.idle_server = ""
+			vs.update_viewnum()
     }
-  }
-	// add a backup server
-  if vs.pending.Backup == "" {
+  } else if vs.current.Backup == "" {
+		// add a backup server
 		vs.replace_backup()
-  }
-  // replace primary/backup server if it restarts
-  if args.Me == vs.current.Primary &&
-     args.Viewnum < vs.current.Viewnum {
-    vs.replace_primary()
-  }
-  if args.Me == vs.current.Backup &&
-     args.Viewnum < vs.current.Viewnum {
+  } else if args.Me == vs.current.Primary && args.Viewnum == 0 {
+		// replace primary server if it restarts
+		vs.replace_primary()
+  } else if args.Me == vs.current.Backup && args.Viewnum == 0 {
+		// replace backup server if it restarts
     vs.replace_backup()
   }
+
+	// update view after acknowledge
+	if args.Me == vs.current.Primary {
+		if args.Viewnum == vs.current.Viewnum {
+			vs.acked_viewnum = vs.current.Viewnum
+		}
+	}
   // send view
-  if args.Me == vs.pending.Primary {
-    reply.View = vs.pending
-  } else {
-    reply.View = vs.current
-  }
-  // fmt.Printf("Server Ping p: %s, b: %s, num: %d\n", 
-  //            reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
+	reply.View = vs.current_view()
   return nil
 }
 
@@ -78,35 +83,42 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 // server Get() RPC handler.
 //
 func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
-  if args.Me == vs.pending.Primary {
-    reply.View = vs.pending
-  } else {
-    reply.View = vs.current
-  }
-  // fmt.Printf("Server Get p: %s, b: %s, num: %d\n", 
+	reply.View = vs.current
+  // fmt.Printf("Server Get p: %s, b: %s, num: %d\n",
   //          reply.View.Primary, reply.View.Backup, reply.View.Viewnum)
   return nil
 }
 
-func (vs *ViewServer) replace_primary() {
-  vs.pending.Primary = vs.current.Backup
-  if vs.idle_server != "" {
-    vs.pending.Backup = vs.idle_server
-    vs.idle_server = ""
-  } else {
-    vs.pending.Backup = ""
-  }
-  vs.pending.Viewnum = vs.current.Viewnum + 1
+func (vs *ViewServer) replace_primary() bool {
+	if vs.current.Backup == "" {
+		fmt.Printf("fatal error: need to replace primary but get no backup\n")
+		return false
+	}
+	fmt.Printf("replace primary, old: %s, new: %s, viewnum: %d\n",
+		vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
+  vs.current.Primary = vs.current.Backup
+	if vs.idle_server != "" {
+		vs.current.Backup = vs.idle_server
+		vs.idle_server = ""
+	} else {
+		vs.current.Backup = ""
+	}
+	vs.update_viewnum()
+	return true
 }
 
-func (vs *ViewServer) replace_backup() {
+func (vs *ViewServer) replace_backup() bool {
   if vs.idle_server != "" {
-    vs.pending.Backup = vs.idle_server
-    vs.idle_server = ""
-  } else {
-    vs.pending.Backup = ""
-  }
-  vs.pending.Viewnum = vs.current.Viewnum + 1
+		fmt.Printf("replace backup, old: %s, new: %s, viewnum: %d\n",
+			vs.current.Backup, vs.idle_server, vs.current.Viewnum)
+    vs.current.Backup = vs.idle_server
+		vs.idle_server = ""
+		vs.update_viewnum()
+		return true
+	} else {
+		vs.current.Backup = ""
+		return false
+	}
 }
 
 //
@@ -124,6 +136,9 @@ func (vs *ViewServer) tick() {
     if now.Sub(pingTime) > PingInterval * DeadPings {
       delete(vs.lastPingTime, server)
       delete(vs.lastPingViewnum, server)
+			if vs.acked_viewnum != vs.current.Viewnum {
+				continue
+			}
       if server == vs.current.Primary {
         vs.replace_primary()
       }
