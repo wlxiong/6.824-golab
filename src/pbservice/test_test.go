@@ -1,6 +1,6 @@
 package pbservice
 
-import "github.com/wlxiong/6.824-golab/viewservice"
+import "viewservice"
 import "fmt"
 import "io"
 import "net"

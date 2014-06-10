@@ -5,6 +5,7 @@ const (
   ErrNoKey = "ErrNoKey"
   ErrWrongServer = "ErrWrongServer"
   ErrForwardBackup = "ErrForwardBackup"
+  ErrNetworkFailure = "ErrNetworkFailure"
 )
 type Err string
 

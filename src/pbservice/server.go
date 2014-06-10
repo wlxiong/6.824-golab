@@ -1,6 +1,6 @@
 package pbservice
 
-import "github.com/wlxiong/6.824-golab/viewservice"
+import "viewservice"
 import "net"
 import "fmt"
 import "net/rpc"
@@ -51,22 +51,26 @@ func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
 
   pb.mu.Lock()
   defer pb.mu.Unlock()
-  pb.values[args.Key] = args.Value
+
   reply.Err = OK
-  forward := ForwardPutArgs{args.Key, args.Value}
-  var fw_reply ForwardPutReply
-  ok := call(pb.view.Backup, "PBServer.ForwardPut", &forward, &fw_reply)
-  if !ok {
-    fmt.Printf("Failed to call PBServer.ForwardPut on backup '%s': (%s, %s)\n", 
-               pb.view.Backup, forward.Key, forward.Value)
-    // reply.Err = ErrForwardBackup
-  } else {
-    if fw_reply.Err == ErrWrongServer {
-      fmt.Printf("Forward to the wrong server: '%s'\n", pb.view.Backup)
-      reply.Err = ErrForwardBackup
-    // } else {
-    //   reply.Err = OK
+  if pb.view.Backup != "" {
+    forward := ForwardPutArgs{args.Key, args.Value}
+    var backup_reply ForwardPutReply
+    ok := call(pb.view.Backup, "PBServer.ForwardPut", &forward, &backup_reply)
+    if !ok {
+      fmt.Printf("Failed to call PBServer.ForwardPut on backup '%s': (%s, %s)\n",
+        pb.view.Backup, forward.Key, forward.Value)
+      reply.Err = ErrNetworkFailure
+    } else {
+      if backup_reply.Err == ErrWrongServer {
+        fmt.Printf("Forward to the wrong server: '%s'\n", pb.view.Backup)
+        reply.Err = ErrForwardBackup
+      }
     }
+  }
+
+  if reply.Err == OK {
+    pb.values[args.Key] = args.Value
   }
 
   return nil
@@ -81,6 +85,7 @@ func (pb *PBServer) SendSnapshot(args *SnapshotArgs, reply *SnapshotReply) error
   pb.mu.Lock()
   defer pb.mu.Unlock()
   pb.values = args.Values
+  reply.Err = OK
   return nil
 }
 
@@ -104,13 +109,13 @@ func (pb *PBServer) ForwardPut(args *ForwardPutArgs, reply *ForwardPutReply) err
 //   manage transfer of state from primary to new backup.
 //
 func (pb *PBServer) tick() {
-  view, _ := pb.vs.Ping(pb.view.Viewnum)
-  fmt.Printf("%s: Ping %d, p: %s, b: %s\n", pb.me, view.Viewnum, view.Primary, view.Backup)
+  view, _ := pb.vs.Get()
+  // fmt.Printf("viewnum: %d, me: %s, p: %s, b: %s\n", view.Viewnum, pb.me, view.Primary, view.Backup)
   pb.mu.Lock()
   defer pb.mu.Unlock()
   update_view := true
   if view.Primary == pb.me {
-    if view.Backup != pb.view.Backup {
+    if view.Backup != pb.view.Backup && view.Backup != "" {
       snapshot := SnapshotArgs{pb.values}
       var reply SnapshotReply
       ok := call(view.Backup, "PBServer.SendSnapshot", &snapshot, &reply)
@@ -132,6 +137,7 @@ func (pb *PBServer) tick() {
   if update_view {
     pb.view = view
   }
+  pb.vs.Ping(pb.view.Viewnum)
 }
 
 // tell the server to shut itself down.

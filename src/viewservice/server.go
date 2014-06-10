@@ -27,8 +27,8 @@ func (vs *ViewServer) update_viewnum() {
 }
 
 func (vs *ViewServer) current_view() View {
-	fmt.Printf("reply> p: %s, b: %s, viewnum: %d\n",
-		vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
+	// fmt.Printf("reply> p: %s, b: %s, viewnum: %d\n",
+	// 	vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
 	return vs.current
 }
 
@@ -39,7 +39,7 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
   vs.mu.Lock()
   defer vs.mu.Unlock()
 
-	fmt.Printf("args> %s: , viewnum: %d, \n",  args.Me, args.Viewnum)
+	// fmt.Printf("args> %s: , viewnum: %d, \n",  args.Me, args.Viewnum)
 
   // update heartbeat stats
   vs.lastPingTime[args.Me] = time.Now()
