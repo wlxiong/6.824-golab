@@ -72,21 +72,17 @@ func (ck *Clerk) Lock(lockname string) bool {
   // fmt.Println("0 Lock", args)
 	ok := call(ck.servers[0], "LockServer.Lock", args, &reply)
   // fmt.Println("0 Lock", args, ok, " reply ", reply.OK)
-	if ok == true {
-		ck.locks[args.Lockname] = args.LockValue
-		return reply.OK
-	} else {
-		var reply1 LockReply
-    // fmt.Println("1 Lock", args)
-		ok = call(ck.servers[1], "LockServer.Lock", args, &reply1)
-    // fmt.Println("1 Lock", args, ok, " reply ", reply1.OK)
-		if ok == true {
-			ck.locks[args.Lockname] = args.LockValue
-			return reply1.OK
-		}
+
+	if !ok {
+		ok = call(ck.servers[1], "LockServer.Lock", args, &reply)
 	}
 
-	return false
+	if !ok {
+		return false
+	}
+
+	ck.locks[args.Lockname] = args.LockValue
+	return reply.OK
 }
 
 //
@@ -104,19 +100,17 @@ func (ck *Clerk) Unlock(lockname string) bool {
   // fmt.Println("0 Unlock", args)
 	ok := call(ck.servers[0], "LockServer.Unlock", args, &reply)
   // fmt.Println("0 Unlock", args, ok, " reply ", reply.OK)
-	if ok == true {
-		ck.locks[args.Lockname] = args.LockValue
-		return reply.OK
-	} else {
-		var reply1 LockReply
-    // fmt.Println("1 Unlock", args)
-		ok = call(ck.servers[1], "LockServer.Unlock", args, &reply1)
-    // fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
-		if ok == true {
-			ck.locks[args.Lockname] = args.LockValue
-			return reply1.OK
-		}
+
+	if !ok {
+		// fmt.Println("1 Unlock", args)
+		ok = call(ck.servers[1], "LockServer.Unlock", args, &reply)
+		// fmt.Println("1 Unlock", args, ok, " reply ", reply1.OK)
 	}
 
-	return false
+	if !ok {
+		return false
+	}
+
+	ck.locks[args.Lockname] = args.LockValue
+	return reply.OK
 }
