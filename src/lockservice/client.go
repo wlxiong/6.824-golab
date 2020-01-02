@@ -63,7 +63,7 @@ func (ck *Clerk) Lock(lockname string) bool {
 	// prepare the arguments.
 	args := &LockArgs{}
 	args.Lockname = lockname
-	args.LockValue = time.Now().UnixNano()
+	args.Lockid = time.Now().UnixNano()
 	var reply LockReply
 
 	// send an RPC request, wait for the reply.
@@ -91,7 +91,7 @@ func (ck *Clerk) Lock(lockname string) bool {
 func (ck *Clerk) Unlock(lockname string) bool {
 	args := &UnlockArgs{}
 	args.Lockname = lockname
-	args.LockValue = -time.Now().UnixNano()
+	args.Lockid = time.Now().UnixNano()
 	var reply UnlockReply
 
   // fmt.Println("0 Unlock", args)

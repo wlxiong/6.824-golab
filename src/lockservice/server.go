@@ -9,9 +9,9 @@ import "os"
 import "io"
 import "time"
 
-type LockOperation struct {
-	LockValue int64
-	status    bool
+type OpKey struct {
+	Lockname string
+	Lockid   int64
 }
 
 type LockServer struct {
@@ -25,7 +25,7 @@ type LockServer struct {
 
 	// for each lock name, is it locked?
 	locks      map[string]bool
-	operations map[string][]LockOperation
+	operations map[OpKey]bool
 }
 
 //
@@ -34,20 +34,35 @@ type LockServer struct {
 // you will have to modify this function
 //
 func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
+	// Q: how to ensure backup sees operations in same order as primary?
+	// A: Holding the lock before doing things ensures that only one request from
+	//    one client is processed at any time. All the requests are processed serially
+	//    in the same order on primary and secondary.
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	_, ok := ls.operations[args.Lockname]
-	if !ok {
-		ls.operations[args.Lockname] = make([]LockOperation, 0)
-	}
-	operations := ls.operations[args.Lockname]
+	// Q: is it OK that client might send same request to both primary and backup?
+	// Q: what happens if the primary fails just after forwarding to the backup?
+	// A: If some requests are successfully processed on primary and secondary but the primary
+	//    fails just before sending the replies to client, the client would re-issue the requests
+	//    to the secondary. The secondary should store the results of all the operations.
+	//    Only storing the final state is not enough, because the secondary might get requests that
+	//    query the result of an old operation.
 
-	for _, op := range operations {
-		if op.LockValue == args.LockValue {
-			reply.OK = op.status
-			return nil
-		}
+	// This trick also solves the following problem:
+	// Q: is "at least once" easy for applications to cope with?
+	//    Harder problem:
+	//    Lock(a)
+	//    Unlock(a) -- but network delays the packet
+	//    Unlock(a) re-send, response arrives
+	//    Lock(a)
+	//    now network delivers the delayed Unlock(a) !!!
+
+	key := OpKey{args.Lockname, args.Lockid}
+	res, ok := ls.operations[key]
+	if ok {
+		reply.OK = res
+		return nil
 	}
 
 	/*	fmt.Println(ls.locks)
@@ -66,9 +81,8 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 			fmt.Println("Cannot call backup:", args)
 		}
 	}
-	operations = append(operations, LockOperation{args.LockValue, reply.OK})
-	ls.operations[args.Lockname] = operations
 
+	ls.operations[key] = reply.OK
 	return nil
 }
 
@@ -79,17 +93,11 @@ func (ls *LockServer) Unlock(args *UnlockArgs, reply *UnlockReply) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	_, ok := ls.operations[args.Lockname]
-	if !ok {
-		ls.operations[args.Lockname] = make([]LockOperation, 0)
-	}
-	operations := ls.operations[args.Lockname]
-
-	for _, op := range operations {
-		if op.LockValue == args.LockValue {
-			reply.OK = op.status
-			return nil
-		}
+	key := OpKey{args.Lockname, args.Lockid}
+	res, ok := ls.operations[key]
+	if ok {
+		reply.OK = res
+		return nil
 	}
 
 	/*	fmt.Println(ls.locks)
@@ -108,9 +116,8 @@ func (ls *LockServer) Unlock(args *UnlockArgs, reply *UnlockReply) error {
 			fmt.Println("Cannot call backup:", args)
 		}
 	}
-	operations = append(operations, LockOperation{args.LockValue, reply.OK})
-	ls.operations[args.Lockname] = operations
 
+	ls.operations[key] = reply.OK
 	return nil
 }
 
@@ -150,7 +157,7 @@ func StartServer(primary string, backup string, am_primary bool) *LockServer {
 	ls.backup = backup
 	ls.am_primary = am_primary
 	ls.locks = make(map[string]bool)
-	ls.operations = make(map[string][]LockOperation)
+	ls.operations = make(map[OpKey]bool)
 
 	// Your initialization code here.
 
