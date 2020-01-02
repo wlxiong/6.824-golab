@@ -11,7 +11,6 @@ import "time"
 type Clerk struct {
 	servers [2]string // primary port, backup port
 	// Your definitions here.
-	locks map[string]int64
 }
 
 func MakeClerk(primary string, backup string) *Clerk {
@@ -19,7 +18,6 @@ func MakeClerk(primary string, backup string) *Clerk {
 	ck.servers[0] = primary
 	ck.servers[1] = backup
 	// Your initialization code here.
-	ck.locks = make(map[string]int64)
 	return ck
 }
 
@@ -81,7 +79,6 @@ func (ck *Clerk) Lock(lockname string) bool {
 		return false
 	}
 
-	ck.locks[args.Lockname] = args.LockValue
 	return reply.OK
 }
 
@@ -111,6 +108,5 @@ func (ck *Clerk) Unlock(lockname string) bool {
 		return false
 	}
 
-	ck.locks[args.Lockname] = args.LockValue
 	return reply.OK
 }
