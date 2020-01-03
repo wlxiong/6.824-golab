@@ -90,14 +90,18 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (vs *ViewServer) replace_primary() bool {
-	if vs.current.Backup == "" {
+  if vs.acked_viewnum != vs.current.Viewnum {
+    fmt.Printf("warning: cannot promote a backup that is not up-to-date\n")
+    return false
+  }
+
+  if vs.current.Backup == "" {
 		fmt.Printf("fatal error: need to replace primary but get no backup\n")
 		return false
 	}
 
   fmt.Printf("replace primary, old: %s, new: %s, viewnum: %d\n",
     vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
-  // assume the backup is alway up-to-date
   vs.current.Primary = vs.current.Backup
 
   if vs.idle_server != "" {
@@ -139,9 +143,6 @@ func (vs *ViewServer) tick() {
     if now.Sub(pingTime) > PingInterval * DeadPings {
       delete(vs.lastPingTime, server)
       delete(vs.lastPingViewnum, server)
-			if vs.acked_viewnum != vs.current.Viewnum {
-				continue
-			}
       if server == vs.current.Primary {
         vs.replace_primary()
       }
