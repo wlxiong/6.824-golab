@@ -25,6 +25,9 @@ type PBServer struct {
 }
 
 func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
+  pb.mu.Lock()
+  defer pb.mu.Unlock()
+
   if pb.view.Primary != pb.me {
     reply.Err = ErrWrongServer
     return nil
@@ -34,9 +37,6 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
   //    after all, Get() doesn't change anything, so why does backup need to know?
   //    and the extra RPC costs time
   // Q: how could we make primary-only Get()s work?
-
-  pb.mu.Lock()
-  defer pb.mu.Unlock()
   v, ok := pb.values[args.Key]
   if !ok {
     reply.Err = ErrNoKey
@@ -49,13 +49,13 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
+  pb.mu.Lock()
+  defer pb.mu.Unlock()
+
   if pb.view.Primary != pb.me {
     reply.Err = ErrWrongServer
     return nil
   }
-
-  pb.mu.Lock()
-  defer pb.mu.Unlock()
 
   reply.Err = OK
   if pb.view.Backup != "" {
@@ -82,26 +82,30 @@ func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
 }
 
 func (pb *PBServer) SendSnapshot(args *SnapshotArgs, reply *SnapshotReply) error {
+  pb.mu.Lock()
+  defer pb.mu.Unlock()
+
   if pb.view.Backup != pb.me {
     fmt.Printf("SendSnapshot: I'm not backup server: '%s'\n", pb.me)
     reply.Err = ErrWrongServer
     return nil
   }
-  pb.mu.Lock()
-  defer pb.mu.Unlock()
+
   pb.values = args.Values
   reply.Err = OK
   return nil
 }
 
 func (pb *PBServer) ForwardPut(args *ForwardPutArgs, reply *ForwardPutReply) error {
+  pb.mu.Lock()
+  defer pb.mu.Unlock()
+
   if pb.view.Backup != pb.me {
     fmt.Printf("ForwardPut: I'm not backup server: '%s'\n", pb.me)
     reply.Err = ErrWrongServer
     return nil
   }
-  pb.mu.Lock()
-  defer pb.mu.Unlock()
+
   pb.values[args.Key] = args.Value
   reply.Err = OK
   return nil
