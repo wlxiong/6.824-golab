@@ -30,6 +30,11 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
     return nil
   }
 
+  // Q: does primary need to forward Get()s to backup?
+  //    after all, Get() doesn't change anything, so why does backup need to know?
+  //    and the extra RPC costs time
+  // Q: how could we make primary-only Get()s work?
+
   pb.mu.Lock()
   defer pb.mu.Unlock()
   v, ok := pb.values[args.Key]
