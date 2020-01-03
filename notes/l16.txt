@@ -1,0 +1,274 @@
+6.824 2013 Lecture 16: Transparency, Network Objects, Plan 9
+
+today:
+  transparency
+  remote objects
+  Plan 9
+
+we've seen many results of "the hard part of distrib computing is Z,
+  let's design a technique/system to simplify Z"
+
+examples:
+  RPC -- communication
+  FDS/Spanner/&c -- storage
+  Paxos -- replication, fault tolerance
+  Argus -- atomic transactions
+  DSM -- application programming
+
+common thread: transparency
+  make remote look the same as local
+  e.g. FDS makes data available on any client, regardless of location
+
+some systems target transparency directly
+  often via naming -- can hide local/remote inside names
+  example: network objects
+  example: distributed operating systems, Plan 9
+
+Network Objects
+
+Why is standard RPC not very transparent?
+  arguments are passed by copying
+    so it's not the same object!
+  example:
+    p = printers.find(printname)
+    f = fs.open(filename)
+    q = spooler.find(prio)
+    q.add(p, f)
+      if p.idle():
+        p.go(f)
+      else: ...
+  makes sense locally, but not with e.g. Go RPC
+    e.g. if client and three servers (printer, FS, spooler)
+    passing p and f won't work correctly
+  work-around: pass names
+    but then all modules have to explicitly know how to find named objects
+    e.g. can't cook up a new Printer object that prints to local buffer
+
+better object support: network objects
+  e.g. DEC Network Objects, CORBA, Java RMI
+  "remote object references"
+    each object is on some home server
+    home gives object references to other machines
+    any machine can use object reference in the usual way
+      call method, pass as RPC argument, &c
+    language runtime transparently forwards method calls to home server
+  object refs as RPC return values
+    c = cartserver.create()
+  RPC for object methods
+    c.add(item)
+  pass remote object to any server
+    warehouse.ship(c)
+  references directly useable on any server
+    warehouse.ship(c):
+      c.list()
+
+how do network objects work?
+  object reference is serverID+objID
+  if server sends a local object to another machine
+    (in RPC reply value, including if inside e.g. returned list/hashtable/&c)
+    home server table mapping objID to object pointer
+    creates a new objID
+    actual reply value has serverID+objID, not pointer
+  when a machine sees a remote object in an RPC reply
+    create a local "stub" object
+    stub has all the right methods
+    and a slot containing serverID+objID
+    RPC library returns pointer to stub object
+  when a machine calls a method of a remote object
+    really calling a method on the stub
+    stub method implementations knows serverID, forward the method call
+  when a machine passes a remote object reference in an RPC
+    even if it's not the home, must include serverID+objID
+  note: all RPC calls are object method calls in this style
+
+this is all about naming
+  a local pointer is a name, but not useful remotely
+  so introduce level of indirection
+  map serverID/objID to server and local pointer
+
+when can a server free (garbage collect) an object?
+  only when no client has a live reference
+  server must learn when new client gets a reference
+  and when client local ref count drops to zero
+  so clients must send RPCs to server to note first/last knowledge
+
+are network objects useful?
+  if you have lots of servers that interact
+    they can eliminate lots of complexity
+    program can use obj refs in usual way, rather than names
+  but:
+    performance -- can't directly use obj data, always remote methods
+    fault tolerance -- not clear how to cope w/ crashed server, dangling refs
+    persistence -- can't write an object ref to disk
+
+****
+
+Why are we reading the Plan 9 paper?
+  it's higher-level infrastructure for distributed computing
+    RPC, DSM, storage are pretty low level
+  this is about architecture and research style, not techniques
+  and it's a story about using naming to gain transparency
+
+idea: distributed operating system
+  single-machine O/S very successful
+    takes care of scheduling, storage, mem mgt, security, &c
+    universal platform for workstation/server/supercomputer
+  why not distributed o/s as infrastructure for distributed systems?
+  many projects in 80s/90s: plan9, amoeba, locus, v, ...
+  common approach:
+    pick a unifying abstraction
+    use it to unify remote and local interaction -- transparency
+    Plan 9: make everything look like a file system
+
+Who are the authors?
+  same bell labs group that invented UNIX in the 1970s
+  values:
+    simplicity
+    tools that work together (pipes, grep, ascii files)
+    file-centric (/dev, stdin)
+    use what you make -- but don't solve probs you don't have
+  they liked the single-machine time-sharing environment
+    easy to share, easy to administer
+    fostered cooperation, community
+  unhappy with 80s isolated PC/workstation model
+
+Big goals?
+  computing environment for programmers, researchers
+  use modern workstation/server/network hardware
+  regain collaborative feel of single time-shared machine
+  avoid per-workstation maintenance / config
+
+Sacrifices?
+  willing to take years, little commercial/publishing pressure
+  willing to tear up existing s/w
+    if needed to get the *right* design
+    this is a big deal in practice -- POSIX compatibility is a bummer
+  willing to pool money to buy shared infrastructure
+  willing to all play the same game (not e.g. everyone chooses own O/S)
+
+What did the Plan 9 system look like?
+  [diagram]
+  lots of cheap "terminals"
+    cpu/mem/keyboard/display/net
+    maybe no disk
+    standard Plan 9 software
+    only for interactive s/w (editors) not e.g. compiler
+    sit down at any -- log in -- looks the same!
+  LAN
+  expensive compute servers
+  file server
+  (not much new at diagram level)
+
+The new part is the O/S design
+
+Unifying design principles:
+  Everything is a file
+  One protocol
+  Private, malleable name spaces
+
+Everything is a file
+  devices: mouse, audio, kbd, tape drive
+  network: write "connect 18.26.4.9!23" to /net/tcp/0/ctl
+  graphics windows: /dev/cons, /dev/mouse, /dev/bitblt
+  process control: /proc/123/mem (ps, debuggers)
+  backups
+  ftp client
+  /dev/time
+  cs -- their DNS server
+
+Why is "everything a file" a good idea?
+  one set of utilities (ls, cat, mount) manages lots of resources
+    vs per-subsystem system calls, protocols, formats, &c
+  less duplication of effort
+    each kind of thing doesn't need its own naming, protection, &c
+  potential for tools that work together
+    like UNIX shell pipes
+    grep emacs /proc/*/cmdline
+  files/directories are nice for organizing and naming
+  you can implement remote file access
+
+Why might "everything a file" be a *bad* idea?
+
+Only one protocol -- 9P
+  (as opposed to every service has a different RPC interface)
+  protocol needed to access network file servers &c
+  system call -> kernel -> 9P -> network -> kernel -> user-level server
+    (fuse lets you do this)
+  RPCs: open, read, write, close, walk; names and FIDs
+    an FID is like a file descriptor
+    why FIDs rather than i-numbers?
+    FIDs imply server state -- fault tolerance, crash recovery
+  can mount a 9P server anywhere in local name space, e.g. /foo
+    kernel maintains mount table: local name -> network connection
+  all services speak 9P -- files, windows, names, network, ftp
+
+Why is "only 9P" a good idea?
+  need some protocol make "everything a file" work across machines
+  9P replaces a host of specialized protocols
+    since all services appear as files,
+    all can be accessed remotely via 9P
+  no need for special per-service protocols
+    example: no need for X protocol
+    mount workstation's /dev/mouse, /dev/bitblt on remote server
+    graphics apps just r/w those files, 9P takes care of remoteness
+
+Why might "only 9P" be a *bad* idea?
+
+Private, malleable name spaces
+  most machines have a single namespace, all processes see same namespace
+  Plan 9 does not -- each process creates its own name space
+  easy for processes to "mount" directories, files
+  intention is that users customize to make it easy to find their resources
+  conventions prevent chaos
+    /dev/cons (my terminal)
+    /dev/mouse
+    /bin/date (executable for my architecture)
+
+Why customizable namespaces a good idea?
+  remote exec on compute server can reproduce entire environment
+    all resources via files + mimic local names
+    mouse, display, audio, home directory, private files on "local" disk
+  re-create someone else's environment, for debugging
+    different s/w versions, perhaps from backup snapshots
+
+Why might customizable per-user namespace be a *bad* idea?
+  i.e. why not do it like UNIX -- all users seem same file namespace?
+
+The three principles work together
+  Everything is a file + share with 9P => can share everything
+    e.g. mount cpu server's /proc locally, debug remote program
+  Remote execution can duplicate local environment 
+    sit in front of a Plan 9 terminal
+    cpu server command 
+    starts a local exportfs
+      a 9P server, turns open &c requests into local system calls
+    on the server:
+      starts a process
+      mounts the exportfs as the process's /
+        so *everything* is the same as on the terminal: devices, local disk, windows, &c
+      special case for /bin
+      special case for main file server
+    contrast to ssh, where remote machine may be very different
+    other users of same compute server may see totally different file name space
+
+Other Plan 9 ideas (some of which other systems now have)
+  /proc (really from UNIX 8th edition)
+  union mounts
+  utf-8
+  backups via snapshot to worm
+  rfork
+
+Is Plan 9 the right thing for end-user computing?
+  attractive for time-sharing enthusiasts
+  high-powered PCs made the shared file/compute server less compelling
+  laptops made the reliance on servers unattractive
+  the Web totally changed what people used computers for
+    collab programming &c -> access to Web services
+
+For distributed systems infrastructure?
+  i.e. if you are google or facebook
+  fault tolerance?
+  scalable storage, services?
+  big data computation?
+
+(based on notes by Russ Cox)
