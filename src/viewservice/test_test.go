@@ -204,15 +204,15 @@ func Test1(t *testing.T) {
       ck3.Ping(vx.Viewnum)
       v, _ := ck1.Get()
       if v.Viewnum > vx.Viewnum {
-				fmt.Printf("new viewnum\n")
+				// fmt.Printf("new viewnum\n")
         break
       }
       time.Sleep(PingInterval)
     }
-		fmt.Printf("ck3.me: %s, ck1.me: %s\n", ck3.me, ck1.me)
+		// fmt.Printf("ck3.me: %s, ck1.me: %s\n", ck3.me, ck1.me)
     check(t, ck1, ck3.me, ck1.me, vx.Viewnum+1)
     vy, _ := ck1.Get()
-		fmt.Printf("p: %s, b: %s\n", vy.Primary, vy.Backup)
+		// fmt.Printf("p: %s, b: %s\n", vy.Primary, vy.Backup)
     // ck3 is the primary, but it never acked.
     // let ck3 die. check that ck1 is not promoted.
     for i := 0; i < DeadPings * 3; i++ {

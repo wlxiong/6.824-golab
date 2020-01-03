@@ -90,6 +90,10 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (vs *ViewServer) replace_primary() bool {
+  // primary in each view must acknowledge that view to viewserver
+  // viewserver must stay with current view until acknowledged
+  // even if the primary seems to have failed
+  // no point in proceeding since not acked == backup may not be initialized
   if vs.acked_viewnum != vs.current.Viewnum {
     fmt.Printf("warning: cannot promote a backup that is not up-to-date\n")
     return false
