@@ -41,6 +41,16 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
+	// Locking granularity
+	//   one mutex for whole lock_server?
+	//   suppose we found handlers were often waiting for that one mutex
+	//     what are reasonable options?
+	//     one mutex per client?
+	//     one mutex per lock?
+	//   if one mutex per lock
+	//     still need one mutex to protect table of locks
+	//   danger of many locks---deadlock and races
+
 	// Q: is it OK that client might send same request to both primary and backup?
 	// Q: what happens if the primary fails just after forwarding to the backup?
 	// A: If some requests are successfully processed on primary and secondary but the primary
@@ -48,6 +58,20 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 	//    to the secondary. The secondary should store the results of all the operations.
 	//    Only storing the final state is not enough, because the secondary might get requests that
 	//    query the result of an old operation.
+
+	// The above procedure is the at-most-once behavior:
+	// Better RPC behavior: "at most once"
+	// idea: server RPC code detects duplicate requests
+	//   returns previous reply instead of re-running handler
+	// client includes unique ID (UID) with each request
+	//   uses same UID for re-send
+	// server:
+	//   if seen[uid]:
+	// 	r = old[uid]
+	//   else
+	// 	r = handler()
+	// 	old[uid] = r
+	// 	seen[uid] = true
 
 	// This trick also solves the following problem:
 	// Q: is "at least once" easy for applications to cope with?
@@ -57,6 +81,36 @@ func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 	//    Unlock(a) re-send, response arrives
 	//    Lock(a)
 	//    now network delivers the delayed Unlock(a) !!!
+
+	//  TODO
+	//  The first two ideas below can be implemented by an ordered dict.
+	// 	some at-most-once complexities
+	// 	how to ensure UID is unique?
+	// 	big random number?
+	// 	combine unique client ID (ip address?) with sequence #?
+	// 	server must eventually discard info about old RPCs
+	// 	when is discard safe?
+	// 	idea:
+	// 		unique client IDs
+	// 		per-client RPC sequence numbers
+	// 		client includes "seen all replies <= X" with every RPC
+	// 		much like TCP sequence #s and acks
+	// 	or only allow client one outstanding RPC at a time
+	// 		arrival of seq+1 allows server to discard all <= seq
+	// 	or client agrees to keep retrying for < 5 minutes
+	// 		server discards after 5+ minutes
+	// 	how to handle dup req while original is still executing?
+	// 	server doesn't know reply yet; don't want to run twice
+	// 	idea: "pending" flag per executing RPC; wait or ignore
+
+	// What if an at-most-once server crashes?
+	// 	if at-most-once duplicate info in memory, server will forget
+	// 	and accept duplicate requests
+	// 	maybe it should write the duplicate info to disk?
+	// 	maybe replica server should also replicate duplicate info?
+
+	// What about "exactly once"?
+	// at-most-once plus unbounded retries
 
 	key := OpKey{args.Lockname, args.Lockid}
 	res, ok := ls.operations[key]
