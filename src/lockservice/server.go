@@ -35,9 +35,9 @@ type LockServer struct {
 //
 func (ls *LockServer) Lock(args *LockArgs, reply *LockReply) error {
 	// Q: how to ensure backup sees operations in same order as primary?
-	// A: Holding the lock before doing things ensures that only one request from
-	//    one client is processed at any time. All the requests are processed serially
-	//    in the same order on primary and secondary.
+	// A: Holding the lock until secondary replies ensures that all the
+	//    requests are processed serially in the same order on primary
+	//    and secondary. Of course the performance is not good.
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 

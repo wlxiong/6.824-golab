@@ -94,10 +94,13 @@ func (vs *ViewServer) replace_primary() bool {
 		fmt.Printf("fatal error: need to replace primary but get no backup\n")
 		return false
 	}
-	fmt.Printf("replace primary, old: %s, new: %s, viewnum: %d\n",
-		vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
+
+  fmt.Printf("replace primary, old: %s, new: %s, viewnum: %d\n",
+    vs.current.Primary, vs.current.Backup, vs.current.Viewnum)
+  // assume the backup is alway up-to-date
   vs.current.Primary = vs.current.Backup
-	if vs.idle_server != "" {
+
+  if vs.idle_server != "" {
 		vs.current.Backup = vs.idle_server
 		vs.idle_server = ""
 	} else {
