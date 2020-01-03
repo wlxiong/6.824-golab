@@ -115,14 +115,18 @@ func (pb *PBServer) tick() {
   defer pb.mu.Unlock()
   update_view := true
   if view.Primary == pb.me {
-    if view.Backup != pb.view.Backup && view.Backup != "" {
+    if view.Backup == "" {
+      update_view = true
+    } else if view.Backup != pb.view.Backup {
       snapshot := SnapshotArgs{pb.values}
       var reply SnapshotReply
       ok := call(view.Backup, "PBServer.SendSnapshot", &snapshot, &reply)
       if !ok {
         fmt.Printf("Failed to call PBServer.SendSnapshot on backup: '%s'\n", view.Backup)
+        update_view = false
       } else if reply.Err == OK {
         fmt.Printf("Successfully send snapshot to backup: '%s'\n", view.Backup)
+        update_view = true
       } else {
         fmt.Printf("Failed to send snapshot to backup '%s': %s\n", view.Backup, reply.Err)
         update_view = false
