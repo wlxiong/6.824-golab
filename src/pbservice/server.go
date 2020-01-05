@@ -20,11 +20,26 @@ type PBServer struct {
   me string
   vs *viewservice.Clerk
   // Your declarations here.
+  lastGetViewTime time.Time
+  staleView bool
   values map[string]string
   view viewservice.View
 }
 
 func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
+  // Q: does primary need to forward Get()s to backup?
+  //    after all, Get() doesn't change anything, so why does backup need to know?
+  //    and the extra RPC costs time
+  // Q: how could we make primary-only Get()s work?
+  // A: if the server is disconnected from view service, stop all get/put ops
+  //    this is to avoid the split brain problem
+
+  if pb.staleView {
+    reply.Err = ErrNetworkFailure
+    fmt.Printf("warning: stale view, lastGetViewTime: %s\n", pb.lastGetViewTime)
+    return nil
+  }
+
   pb.mu.Lock()
   defer pb.mu.Unlock()
 
@@ -33,10 +48,6 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
     return nil
   }
 
-  // Q: does primary need to forward Get()s to backup?
-  //    after all, Get() doesn't change anything, so why does backup need to know?
-  //    and the extra RPC costs time
-  // Q: how could we make primary-only Get()s work?
   v, ok := pb.values[args.Key]
   if !ok {
     reply.Err = ErrNoKey
@@ -49,6 +60,12 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
+  if pb.staleView {
+    reply.Err = ErrNetworkFailure
+    fmt.Printf("warning: stale view, lastGetViewTime: %s\n", pb.lastGetViewTime)
+    return nil
+  }
+
   pb.mu.Lock()
   defer pb.mu.Unlock()
 
@@ -118,7 +135,18 @@ func (pb *PBServer) ForwardPut(args *ForwardPutArgs, reply *ForwardPutReply) err
 //   manage transfer of state from primary to new backup.
 //
 func (pb *PBServer) tick() {
-  view, _ := pb.vs.Get()
+  view, ok := pb.vs.Get()
+  now := time.Now()
+  if !ok {
+    if now.Sub(pb.lastGetViewTime) > viewservice.PingInterval * viewservice.DeadPings / 2 {
+      pb.staleView = true
+    }
+    return
+  } else {
+    pb.lastGetViewTime = now
+    pb.staleView = false
+  }
+
   // fmt.Printf("viewnum: %d, me: %s, p: %s, b: %s\n", view.Viewnum, pb.me, view.Primary, view.Backup)
   pb.mu.Lock()
   defer pb.mu.Unlock()
@@ -166,6 +194,8 @@ func StartServer(vshost string, me string) *PBServer {
   pb.me = me
   pb.vs = viewservice.MakeClerk(me, vshost)
   // Your pb.* initializations here.
+  pb.staleView = true
+  pb.lastGetViewTime = time.Now()
   pb.values = make(map[string]string)
 
   rpcs := rpc.NewServer()
