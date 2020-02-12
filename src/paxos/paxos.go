@@ -29,6 +29,14 @@ import "sync"
 import "fmt"
 import "math/rand"
 
+type LogInstance struct {
+    // highest prepare seen
+    np int
+    // highest accept seen
+    na int 
+    va interface{}
+    decided bool
+}
 
 type Paxos struct {
   mu sync.Mutex
@@ -39,8 +47,11 @@ type Paxos struct {
   peers []string
   me int // index into peers[]
 
-
   // Your data here.
+  logIds []int
+  logInstances map[int]*LogInstance
+  maxSeq int
+  minSeq int
 }
 
 //
@@ -77,6 +88,257 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
   return false
 }
 
+func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  entry, ok := px.logInstances[args.Seq]
+  if !ok {
+    entry = &LogInstance{ -1, -1, args.V, true }
+    px.logInstances[args.Seq] = entry
+  } else {
+    entry.decided = true
+  }
+
+  reply.Err = OK
+  return nil
+}
+
+func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  // acceptor's prepare(n) handler:
+  // if n > n_p
+  //   n_p = n
+  //   reply prepare_ok(n_a, v_a)
+  // else
+  //   reply prepare_reject
+
+  entry, ok := px.logInstances[args.Seq]
+  if !ok {
+    entry = &LogInstance{ -1, -1, nil, false }
+    px.logInstances[args.Seq] = entry
+  }
+
+  // log.Printf("handle prepare: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
+  // log.Printf("handle prepare: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+
+  if args.N > entry.np {
+    entry.np = args.N
+    reply.Seq = args.Seq
+    reply.Na = entry.na
+    reply.Va = entry.va
+    reply.Err = OK
+  } else {
+    reply.Na = entry.na
+    reply.Err = Reject
+  }
+
+  // log.Printf("handle prepare: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+
+  return nil
+}
+
+
+func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  // acceptor's accept(n, v) handler:
+  //   if n >= n_p
+  //     n_p = n
+  //     n_a = n
+  //     v_a = v
+  //     reply accept_ok(n)
+  //   else
+  //     reply accept_reject
+
+  entry, ok := px.logInstances[args.Seq]
+  if !ok {
+    entry = &LogInstance{ -1, -1, nil, false }
+    px.logInstances[args.Seq] = entry
+  }
+
+  // log.Printf("handle accept: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
+  // log.Printf("handle accept: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+
+  if args.N >= entry.np {
+    entry.np = args.N
+    entry.na = args.N
+    entry.va = args.V
+    reply.Seq = args.Seq
+    reply.N = args.N
+    reply.Err = OK
+  } else {
+    reply.N = args.N
+    reply.Err = Reject
+  }
+
+  // log.Printf("handle accept: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+
+  return nil
+}
+
+func (px *Paxos) FindLargerNumber(n int) int {
+  num := px.me
+  for num <= n {
+    num += 10000
+  }
+  return num
+}
+
+func (px *Paxos) DoPrepare(seq int, v interface{}) {
+  px.mu.Lock()
+  defer px.mu.Unlock()
+
+  _, ok := px.logInstances[seq]
+  if ok {
+    return
+  }
+
+  px.logIds = append(px.logIds, seq)
+  px.logInstances[seq] = &LogInstance{ -1, -1, nil, false }
+
+  // proposer(v):
+  // while not decided:
+  //   choose n, unique and higher than any n seen so far
+  //   send prepare(n) to all servers including self
+  //   if prepare_ok(n_a, v_a) from majority:
+  //     v' = v_a with highest n_a; choose own v otherwise
+  //     send accept(n, v') to all
+  //     if accept_ok(n) from majority:
+  //       send decided(v') to all
+
+  go func() {
+    decided := false
+    n := px.FindLargerNumber(px.me)
+
+    numPeers := len(px.peers)
+    numAccepted := 0
+    numRejected := 0
+    peerStatus := make(map[string]Err)
+    maxPeerAcceptedNum := -1
+    maxPeerNum := n
+    var acceptedVal interface {} = nil
+    // acceptProcStart := false
+
+    for !px.dead && !decided {
+      args := PrepareArgs { Seq: seq, N: n }
+
+      for _, p := range px.peers {
+        _, ok = peerStatus[p]
+        if ok {
+          continue
+        }
+
+        var reply PrepareReply
+        ok := call(p, "Paxos.HandlePrepare", &args, &reply)
+        if ok {
+          peerStatus[p] = reply.Err
+          if maxPeerNum < reply.Na {
+            maxPeerNum = reply.Na
+          }
+          if reply.Err == OK {
+            numAccepted += 1
+            if maxPeerAcceptedNum < reply.Na {
+              maxPeerAcceptedNum = reply.Na
+              acceptedVal = reply.Va
+            }
+          } else if reply.Err == Reject {
+            numRejected += 1
+          }
+        }
+      }
+
+      fmt.Printf("prepare: n %d accept %d reject %d\n", n, numAccepted, numRejected)
+
+      if numAccepted > numPeers / 2 {
+        // success
+        if acceptedVal != nil {
+          v = acceptedVal
+        }
+        decided = px.DoAccept(seq, v, n)
+      } else if numRejected > numPeers / 2 {
+        // failure
+        n = px.FindLargerNumber(maxPeerNum)
+        numAccepted = 0
+        numRejected = 0
+        peerStatus = make(map[string]Err)
+        maxPeerAcceptedNum = -1
+        maxPeerNum = -1
+        acceptedVal = nil
+      }
+    }
+
+    // decided
+    numAcked := 0
+    peerStatus = make(map[string]Err)
+    args := DecidedArgs { seq, v }
+    for !px.dead && numAcked < numPeers {
+      for _, p := range px.peers {
+        err, ok := peerStatus[p]
+        if ok && err == OK { continue }
+        var reply DecidedReply
+        ok = call(p, "Paxos.HandleDecided", &args, &reply)
+        if ok {
+          numAcked += 1
+          peerStatus[p] = reply.Err
+        }
+      }
+    }
+
+  }()
+}
+
+func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
+  numPeers := len(px.peers)
+  numAccepted := 0
+  numRejected := 0
+  peerStatus := make(map[string]Err)
+
+  args := AcceptArgs { Seq: seq, N: n, V: v }
+  for !px.dead {
+
+    for _, p := range px.peers {
+      _, ok := peerStatus[p]
+      if ok {
+        continue
+      }
+
+      var reply AcceptReply
+      ok = call(p, "Paxos.HandleAccept", &args, &reply)
+      if ok {
+        peerStatus[p] = reply.Err
+        if reply.Err == OK {
+          numAccepted += 1
+        } else if reply.Err == Reject {
+          numRejected += 1
+        }
+      }
+    }
+
+    fmt.Printf("accept: n %d accept %d reject %d\n", n, numAccepted, numRejected)
+
+    if numAccepted > numPeers / 2 {
+      // success
+      px.mu.Lock()
+      defer px.mu.Unlock()
+      entry, _ := px.logInstances[seq]
+      entry.decided = true
+      entry.va = v
+      return true
+    } else if numRejected > numPeers / 2 {
+      // failure
+      return false
+    }
+  }
+
+  return false
+}
 
 //
 // the application wants paxos to start agreement on
@@ -86,7 +348,7 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 // is reached.
 //
 func (px *Paxos) Start(seq int, v interface{}) {
-  // Your code here.
+  px.DoPrepare(seq, v)
 }
 
 //
@@ -105,8 +367,9 @@ func (px *Paxos) Done(seq int) {
 // this peer.
 //
 func (px *Paxos) Max() int {
-  // Your code here.
-  return 0
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  return px.maxSeq
 }
 
 //
@@ -153,7 +416,13 @@ func (px *Paxos) Min() int {
 // it should not contact other Paxos peers.
 //
 func (px *Paxos) Status(seq int) (bool, interface{}) {
-  // Your code here.
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  entry, ok := px.logInstances[seq]
+  if ok {
+    fmt.Printf("status, me %d entry %v\n", px.me, entry)
+    return entry.decided, entry.va
+  }
   return false, nil
 }
 
@@ -180,8 +449,10 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
   px.peers = peers
   px.me = me
 
-
   // Your initialization code here.
+  px.logIds = make([]int, 0, 100)
+  px.logInstances = make(map[int]*LogInstance)
+  px.maxSeq = -1
 
   if rpcs != nil {
     // caller will create socket &c
