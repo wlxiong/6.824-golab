@@ -29,13 +29,21 @@ import "sync"
 import "fmt"
 import "math/rand"
 
+const (
+  Unknown = "Unknown"
+  Working = "Working"
+  Decided = "Decided"
+)
+
+type Status string
+
 type LogInstance struct {
     // highest prepare seen
     np int
     // highest accept seen
     na int
     va interface{}
-    decided bool
+    status Status
 }
 
 type Paxos struct {
@@ -95,10 +103,10 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.N, args.N, args.V, true }
+    entry = &LogInstance{ args.N, args.N, args.V, Unknown }
     px.logInstances[args.Seq] = entry
   } else {
-    entry.decided = true
+    entry.status = Decided
   }
 
   reply.Err = OK
@@ -119,7 +127,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ -1, -1, nil, false }
+    entry = &LogInstance{ -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
   }
 
@@ -159,7 +167,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ -1, -1, nil, false }
+    entry = &LogInstance{ -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
   }
 
@@ -195,13 +203,20 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   px.mu.Lock()
   defer px.mu.Unlock()
 
-  _, ok := px.logInstances[seq]
+  entry, ok := px.logInstances[seq]
   if ok {
+    if entry.status == Working {
+      log.Printf("working on seq %d", seq)
+      return
+    } else if entry.status == Decided {
+      log.Printf("already decided seq %d", seq)
+      return
+    }
     return
   }
 
   px.logIds = append(px.logIds, seq)
-  px.logInstances[seq] = &LogInstance{ -1, -1, nil, false }
+  px.logInstances[seq] = &LogInstance{ -1, -1, nil, Working }
 
   // proposer(v):
   // while not decided:
@@ -328,7 +343,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       px.mu.Lock()
       defer px.mu.Unlock()
       entry, _ := px.logInstances[seq]
-      entry.decided = true
+      entry.status = Decided
       entry.va = v
       return true
     } else if numRejected > numPeers / 2 {
@@ -421,7 +436,7 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
   entry, ok := px.logInstances[seq]
   if ok {
     fmt.Printf("status, me %d entry %v\n", px.me, entry)
-    return entry.decided, entry.va
+    return entry.status == Decided, entry.va
   }
   return false, nil
 }
