@@ -56,10 +56,12 @@ type Paxos struct {
   me int // index into peers[]
 
   // Your data here.
-  logIds []int
+  logSeqs []int
   logInstances map[int]*LogInstance
+  peerDoneSeqs map[int]int
   maxSeq int
   minSeq int
+  doneSeq int
 }
 
 //
@@ -96,15 +98,48 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
   return false
 }
 
+// hold px.mu before call this func
+func (px *Paxos) UpdatePeerSeq(peer int, seq int, done int) {
+  if px.maxSeq < seq { px.maxSeq = seq }
+
+  px.peerDoneSeqs[peer] = done
+  if len(px.peerDoneSeqs) < len(px.peers) {
+    return
+  }
+
+  minDoneSeq := px.doneSeq
+  for _, n := range px.peerDoneSeqs {
+    if minDoneSeq > n { minDoneSeq = n }
+  }
+
+  if minDoneSeq + 1 > px.minSeq {
+    log.Printf("me %d, new min seq %d, old min seq %d", px.me, minDoneSeq + 1, px.minSeq)
+    px.minSeq = minDoneSeq + 1
+    var activeSeqs []int
+    log.Printf("num of logs %d", len(px.logSeqs))
+    for _, s := range px.logSeqs {
+      if s < px.minSeq {
+        log.Printf("remove log with seq %d", s)
+        delete(px.logInstances, s)
+      } else {
+        activeSeqs = append(activeSeqs, s)
+      }
+    }
+    px.logSeqs = activeSeqs
+  }
+}
+
 func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  px.UpdatePeerSeq(args.Peer, args.Seq, args.DoneSeq)
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
     entry = &LogInstance{ args.N, args.N, args.V, Unknown }
     px.logInstances[args.Seq] = entry
+    px.logSeqs = append(px.logSeqs, args.Seq)
   } else {
     entry.status = Decided
   }
@@ -116,7 +151,8 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  px.UpdatePeerSeq(args.Peer, args.Seq, args.DoneSeq)
 
   // acceptor's prepare(n) handler:
   // if n > n_p
@@ -129,6 +165,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
   if !ok {
     entry = &LogInstance{ -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
+    px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
   // log.Printf("handle prepare: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
@@ -154,7 +191,8 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
 func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
   px.mu.Lock()
   defer px.mu.Unlock()
-  if px.maxSeq < args.Seq { px.maxSeq = args.Seq }
+
+  px.UpdatePeerSeq(args.Peer, args.Seq, args.DoneSeq)
 
   // acceptor's accept(n, v) handler:
   //   if n >= n_p
@@ -169,6 +207,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
   if !ok {
     entry = &LogInstance{ -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
+    px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
   // log.Printf("handle accept: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
@@ -203,6 +242,10 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   px.mu.Lock()
   defer px.mu.Unlock()
 
+  if seq < px.minSeq {
+    return
+  }
+
   entry, ok := px.logInstances[seq]
   if ok {
     if entry.status == Working {
@@ -215,8 +258,8 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     return
   }
 
-  px.logIds = append(px.logIds, seq)
   px.logInstances[seq] = &LogInstance{ -1, -1, nil, Working }
+  px.logSeqs = append(px.logSeqs, seq)
 
   // proposer(v):
   // while not decided:
@@ -242,7 +285,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     // acceptProcStart := false
 
     for !px.dead && !decided {
-      args := PrepareArgs { Seq: seq, N: n }
+      args := PrepareArgs { seq, n, px.me, px.doneSeq }
 
       for _, p := range px.peers {
         _, ok = peerStatus[p]
@@ -292,7 +335,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     // decided
     numAcked := 0
     peerStatus = make(map[string]Err)
-    args := DecidedArgs { seq, n, v }
+    args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
     for !px.dead && numAcked < numPeers {
       for _, p := range px.peers {
         err, ok := peerStatus[p]
@@ -315,7 +358,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
   numRejected := 0
   peerStatus := make(map[string]Err)
 
-  args := AcceptArgs { Seq: seq, N: n, V: v }
+  args := AcceptArgs { seq, n, v, px.me, px.doneSeq }
   for !px.dead {
 
     for _, p := range px.peers {
@@ -363,6 +406,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
 // is reached.
 //
 func (px *Paxos) Start(seq int, v interface{}) {
+  // fmt.Printf("start, seq %d v %v\n", seq, v)
   px.DoPrepare(seq, v)
 }
 
@@ -373,7 +417,12 @@ func (px *Paxos) Start(seq int, v interface{}) {
 // see the comments for Min() for more explanation.
 //
 func (px *Paxos) Done(seq int) {
-  // Your code here.
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  fmt.Printf("done %d, me %d\n", seq, px.me)
+  if seq > px.doneSeq {
+    px.doneSeq = seq
+  }
 }
 
 //
@@ -384,6 +433,7 @@ func (px *Paxos) Done(seq int) {
 func (px *Paxos) Max() int {
   px.mu.Lock()
   defer px.mu.Unlock()
+  fmt.Printf("max %d, me %d\n", px.maxSeq, px.me)
   return px.maxSeq
 }
 
@@ -419,8 +469,10 @@ func (px *Paxos) Max() int {
 // instances.
 // 
 func (px *Paxos) Min() int {
-  // You code here.
-  return 0
+  px.mu.Lock()
+  defer px.mu.Unlock()
+  fmt.Printf("min %d, me %d\n", px.minSeq, px.me)
+  return px.minSeq
 }
 
 //
@@ -433,9 +485,15 @@ func (px *Paxos) Min() int {
 func (px *Paxos) Status(seq int) (bool, interface{}) {
   px.mu.Lock()
   defer px.mu.Unlock()
+
+  fmt.Printf("status, me %d seq %d\n", px.me, seq)
+  if seq < px.minSeq {
+    return false, nil
+  }
+
   entry, ok := px.logInstances[seq]
   if ok {
-    fmt.Printf("status, me %d entry %v\n", px.me, entry)
+    // fmt.Printf("status, me %d entry %v\n", px.me, entry)
     return entry.status == Decided, entry.va
   }
   return false, nil
@@ -465,9 +523,12 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
   px.me = me
 
   // Your initialization code here.
-  px.logIds = make([]int, 0, 100)
+  px.logSeqs = make([]int, 0, 100)
   px.logInstances = make(map[int]*LogInstance)
+  px.peerDoneSeqs = make(map[int]int)
   px.maxSeq = -1
+  px.minSeq = 0
+  px.doneSeq = -1
 
   if rpcs != nil {
     // caller will create socket &c

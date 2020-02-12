@@ -10,6 +10,8 @@ type Err string
 type PrepareArgs struct {
 	Seq int
 	N int
+	Peer int
+	DoneSeq int
 }
 
 type PrepareReply struct {
@@ -23,6 +25,8 @@ type AcceptArgs struct {
 	Seq int
 	N int
 	V interface{}
+	Peer int
+	DoneSeq int
 }
 
 type AcceptReply struct {
@@ -35,6 +39,8 @@ type DecidedArgs struct {
 	Seq int
 	N int
 	V interface {}
+	Peer int
+	DoneSeq int
 }
 
 type DecidedReply struct {
