@@ -33,7 +33,7 @@ type LogInstance struct {
     // highest prepare seen
     np int
     // highest accept seen
-    na int 
+    na int
     va interface{}
     decided bool
 }
@@ -95,7 +95,7 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ -1, -1, args.V, true }
+    entry = &LogInstance{ args.N, args.N, args.V, true }
     px.logInstances[args.Seq] = entry
   } else {
     entry.decided = true
@@ -277,7 +277,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     // decided
     numAcked := 0
     peerStatus = make(map[string]Err)
-    args := DecidedArgs { seq, v }
+    args := DecidedArgs { seq, n, v }
     for !px.dead && numAcked < numPeers {
       for _, p := range px.peers {
         err, ok := peerStatus[p]

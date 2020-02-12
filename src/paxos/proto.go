@@ -33,6 +33,7 @@ type AcceptReply struct {
 
 type DecidedArgs struct {
 	Seq int
+	N int
 	V interface {}
 }
 
