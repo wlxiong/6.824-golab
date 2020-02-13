@@ -38,12 +38,13 @@ const (
 type Status string
 
 type LogInstance struct {
-    // highest prepare seen
-    np int
-    // highest accept seen
-    na int
-    va interface{}
-    status Status
+  seq int
+  // highest prepare seen
+  np int
+  // highest accept seen
+  na int
+  va interface{}
+  status Status
 }
 
 type Paxos struct {
@@ -137,7 +138,7 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.N, args.N, args.V, Decided }
+    entry = &LogInstance{ args.Seq, args.N, args.N, args.V, Decided }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   } else {
@@ -165,7 +166,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ -1, -1, nil, Unknown }
+    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
@@ -204,7 +205,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ -1, -1, nil, Unknown }
+    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
@@ -254,7 +255,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     return
   }
 
-  px.logInstances[seq] = &LogInstance{ -1, -1, nil, Working }
+  px.logInstances[seq] = &LogInstance{ seq, -1, -1, nil, Working }
   px.logSeqs = append(px.logSeqs, seq)
 
   // proposer(v):
