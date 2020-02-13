@@ -270,6 +270,11 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   //       send decided(v') to all
 
   go func() {
+
+    sleepms := rand.Intn(px.me * 10 + 1)
+    fmt.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
+    time.Sleep(time.Duration(sleepms) * time.Millisecond)
+
     decided := false
     n := px.FindLargerNumber(px.me)
 
@@ -330,6 +335,9 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         decided = px.DoAccept(seq, v, n)
       } else if numRejected > numPeers / 2 {
         // failure
+        sleepms := rand.Intn(px.me * 10 + 1)
+        fmt.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
+        time.Sleep(time.Duration(sleepms) * time.Millisecond)
         n = px.FindLargerNumber(maxPeerNum)
         numAccepted = 0
         numRejected = 0
