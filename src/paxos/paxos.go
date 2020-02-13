@@ -279,7 +279,6 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     maxPeerAcceptedNum := -1
     maxPeerNum := n
     var acceptedVal interface {} = nil
-    // acceptProcStart := false
 
     for !px.dead && !decided {
       args := PrepareArgs { seq, n, px.me, px.doneSeq }
@@ -380,11 +379,6 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
 
     if numAccepted > numPeers / 2 {
       // success
-      px.mu.Lock()
-      defer px.mu.Unlock()
-      entry, _ := px.logInstances[seq]
-      entry.status = Decided
-      entry.va = v
       return true
     } else if numRejected > numPeers / 2 {
       // failure
