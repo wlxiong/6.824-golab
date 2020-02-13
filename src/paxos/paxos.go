@@ -145,7 +145,7 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
     entry.status = Decided
   }
 
-  fmt.Printf("[%d] handle decided: args %v entry %v\n", px.me, args, entry)
+  fmt.Printf("[%d] handle decided: args %+v entry %+v\n", px.me, args, entry)
 
   reply.Err = OK
   return nil
@@ -171,7 +171,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  fmt.Printf("[%d] handle prepare: args %v entry %v\n", px.me, args, entry)
+  fmt.Printf("[%d] handle prepare: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N > entry.np {
     entry.np = args.N
@@ -210,7 +210,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  fmt.Printf("[%d] handle accept: args %v entry %v\n", px.me, args, entry)
+  fmt.Printf("[%d] handle accept: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N >= entry.np {
     entry.np = args.N
@@ -490,7 +490,7 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
 
   entry, ok := px.logInstances[seq]
   if ok {
-    fmt.Printf("[%d] status: seq %d, entry %v\n", px.me, seq, entry)
+    fmt.Printf("[%d] status: seq %d, entry %+v\n", px.me, seq, entry)
     return entry.status == Decided, entry.va
   }
 
