@@ -139,10 +139,16 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.Seq, args.N, args.N, args.V, Decided }
+    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
-  } else {
+  }
+
+  if args.N >= entry.np {
+    entry.seq = args.Seq
+    entry.np = args.N
+    entry.na = args.N
+    entry.va = args.V
     entry.status = Decided
   }
 
@@ -287,6 +293,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     var acceptedVal interface {} = nil
 
     for !px.dead && !decided {
+      fmt.Printf("[%d] try to start a new round, seq %d, n %d\n", px.me, seq, n)
 
       func() {
         px.mu.Lock()
@@ -295,6 +302,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
       }()
 
       if ok && entry.status == Decided {
+        fmt.Printf("[%d] already decided, entry %+v\n", px.me, entry)
         return
       }
 
