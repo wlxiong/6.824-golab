@@ -28,6 +28,7 @@ import "syscall"
 import "sync"
 import "fmt"
 import "math/rand"
+import "time"
 
 const (
   Unknown = "Unknown"
@@ -281,6 +282,17 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     var acceptedVal interface {} = nil
 
     for !px.dead && !decided {
+
+      func() {
+        px.mu.Lock()
+        defer px.mu.Unlock()
+        entry, ok = px.logInstances[seq]
+      }()
+
+      if ok && entry.status == Decided {
+        return
+      }
+
       args := PrepareArgs { seq, n, px.me, px.doneSeq }
 
       for _, p := range px.peers {
