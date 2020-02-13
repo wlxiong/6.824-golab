@@ -64,6 +64,7 @@ type Paxos struct {
   maxSeq int
   minSeq int
   doneSeq int
+  maxPeerNum int
 }
 
 //
@@ -294,13 +295,13 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
 
     decided := false
     n := px.FindLargerNumber(px.me)
+    px.maxPeerNum = n
 
     numPeers := len(px.peers)
     numAccepted := 0
     numRejected := 0
     peerStatus := make(map[string]Err)
     maxPeerAcceptedNum := -1
-    maxPeerNum := n
     var acceptedVal interface {} = nil
 
     for !px.dead && !decided {
@@ -329,8 +330,8 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         ok := callWithRetry(p, "Paxos.HandlePrepare", &args, &reply, 5)
         if ok {
           peerStatus[p] = reply.Err
-          if maxPeerNum < reply.Na {
-            maxPeerNum = reply.Na
+          if px.maxPeerNum < reply.Na {
+            px.maxPeerNum = reply.Na
           }
           if reply.Err == OK {
             numAccepted += 1
@@ -352,19 +353,19 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
           v = acceptedVal
         }
         decided = px.DoAccept(seq, v, n)
-      } else if numRejected > numPeers / 2 {
-        // failure
+      }
+
+      if !decided {
+        // not decided yet
         px.WaitForSomeMilliseconds()
-        n = px.FindLargerNumber(maxPeerNum)
-        numAccepted = 0
-        numRejected = 0
-        peerStatus = make(map[string]Err)
-        maxPeerAcceptedNum = -1
-        maxPeerNum = -1
-        acceptedVal = nil
-      } else {
-        // wait before retry
-        px.WaitForSomeMilliseconds()
+        if numRejected > 0 {
+          n = px.FindLargerNumber(px.maxPeerNum)
+          numAccepted = 0
+          numRejected = 0
+          peerStatus = make(map[string]Err)
+          maxPeerAcceptedNum = -1
+          acceptedVal = nil
+        }
       }
     }
 
@@ -407,6 +408,9 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       ok = callWithRetry(p, "Paxos.HandleAccept", &args, &reply, 5)
       if ok {
         peerStatus[p] = reply.Err
+        if px.maxPeerNum < reply.N {
+          px.maxPeerNum = reply.N
+        }
         if reply.Err == OK {
           numAccepted += 1
         } else if reply.Err == Reject {
@@ -420,7 +424,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
     if numAccepted > numPeers / 2 {
       // success
       return true
-    } else if numRejected > numPeers / 2 {
+    } else if numRejected > 0 {
       // failure
       return false
     }
