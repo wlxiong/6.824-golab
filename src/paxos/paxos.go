@@ -100,6 +100,14 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
   return false
 }
 
+func callWithRetry(srv string, name string, args interface{}, reply interface{}, maxRetries int) bool {
+  for retry := 0; retry < maxRetries; retry++ {
+    ok := call(srv, name, args, reply)
+    if ok { return true }
+  }
+  return false
+}
+
 // hold px.mu before call this func
 func (px *Paxos) UpdatePeerSeq(peer int, seq int, done int) {
   if px.maxSeq < seq { px.maxSeq = seq }
@@ -315,7 +323,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         }
 
         var reply PrepareReply
-        ok := call(p, "Paxos.HandlePrepare", &args, &reply)
+        ok := callWithRetry(p, "Paxos.HandlePrepare", &args, &reply, 5)
         if ok {
           peerStatus[p] = reply.Err
           if maxPeerNum < reply.Na {
@@ -392,7 +400,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       }
 
       var reply AcceptReply
-      ok = call(p, "Paxos.HandleAccept", &args, &reply)
+      ok = callWithRetry(p, "Paxos.HandleAccept", &args, &reply, 5)
       if ok {
         peerStatus[p] = reply.Err
         if reply.Err == OK {
