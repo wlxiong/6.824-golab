@@ -113,13 +113,13 @@ func (px *Paxos) UpdatePeerSeq(peer int, seq int, done int) {
   }
 
   if minDoneSeq + 1 > px.minSeq {
-    log.Printf("me %d, new min seq %d, old min seq %d", px.me, minDoneSeq + 1, px.minSeq)
+    fmt.Printf("update peer [%d] seq: new min seq %d, old min seq %d", px.me, minDoneSeq + 1, px.minSeq)
     px.minSeq = minDoneSeq + 1
     var activeSeqs []int
-    log.Printf("num of logs %d", len(px.logSeqs))
+    fmt.Printf("update peer [%d] seq: num of logs %d", px.me, len(px.logSeqs))
     for _, s := range px.logSeqs {
       if s < px.minSeq {
-        log.Printf("remove log with seq %d", s)
+        fmt.Printf("update peer [%d] seq: remove log with seq %d", px.me, s)
         delete(px.logInstances, s)
       } else {
         activeSeqs = append(activeSeqs, s)
@@ -137,12 +137,14 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.N, args.N, args.V, Unknown }
+    entry = &LogInstance{ args.N, args.N, args.V, Decided }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   } else {
     entry.status = Decided
   }
+
+  fmt.Printf("[%d] handle decided: args %v entry %v\n", px.me, args, entry)
 
   reply.Err = OK
   return nil
@@ -168,8 +170,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  // log.Printf("handle prepare: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
-  // log.Printf("handle prepare: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+  fmt.Printf("[%d] handle prepare: args %v entry %v\n", px.me, args, entry)
 
   if args.N > entry.np {
     entry.np = args.N
@@ -181,8 +182,6 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
     reply.Na = entry.na
     reply.Err = Reject
   }
-
-  // log.Printf("handle prepare: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
 
   return nil
 }
@@ -210,8 +209,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  // log.Printf("handle accept: me %d seq %d arg.N %d", px.me, args.Seq, args.N)
-  // log.Printf("handle accept: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
+  fmt.Printf("[%d] handle accept: args %v entry %v\n", px.me, args, entry)
 
   if args.N >= entry.np {
     entry.np = args.N
@@ -224,8 +222,6 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
     reply.N = args.N
     reply.Err = Reject
   }
-
-  // log.Printf("handle accept: seq %d np %d na %d decided %t", args.Seq, entry.np, entry.na, entry.decided)
 
   return nil
 }
@@ -312,7 +308,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         }
       }
 
-      fmt.Printf("prepare: n %d accept %d reject %d\n", n, numAccepted, numRejected)
+      fmt.Printf("[%d] prepare: n %d accept %d reject %d\n", px.me, n, numAccepted, numRejected)
 
       if numAccepted > numPeers / 2 {
         // success
@@ -379,7 +375,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       }
     }
 
-    fmt.Printf("accept: n %d accept %d reject %d\n", n, numAccepted, numRejected)
+    fmt.Printf("[%d] accept: n %d accept %d reject %d\n", px.me, n, numAccepted, numRejected)
 
     if numAccepted > numPeers / 2 {
       // success
@@ -406,7 +402,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
 // is reached.
 //
 func (px *Paxos) Start(seq int, v interface{}) {
-  // fmt.Printf("start, seq %d v %v\n", seq, v)
+  fmt.Printf("[%d] start: seq %d v %v\n", px.me, seq, v)
   px.DoPrepare(seq, v)
 }
 
@@ -419,7 +415,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 func (px *Paxos) Done(seq int) {
   px.mu.Lock()
   defer px.mu.Unlock()
-  fmt.Printf("done %d, me %d\n", seq, px.me)
+  fmt.Printf("[%d] done: seq %d\n", px.me, seq)
   if seq > px.doneSeq {
     px.doneSeq = seq
   }
@@ -433,7 +429,7 @@ func (px *Paxos) Done(seq int) {
 func (px *Paxos) Max() int {
   px.mu.Lock()
   defer px.mu.Unlock()
-  fmt.Printf("max %d, me %d\n", px.maxSeq, px.me)
+  fmt.Printf("[%d] max: maxseq %d\n", px.me, px.maxSeq)
   return px.maxSeq
 }
 
@@ -471,7 +467,7 @@ func (px *Paxos) Max() int {
 func (px *Paxos) Min() int {
   px.mu.Lock()
   defer px.mu.Unlock()
-  fmt.Printf("min %d, me %d\n", px.minSeq, px.me)
+  fmt.Printf("[%d] min: minseq %d\n", px.me, px.minSeq)
   return px.minSeq
 }
 
@@ -486,16 +482,17 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
   px.mu.Lock()
   defer px.mu.Unlock()
 
-  fmt.Printf("status, me %d seq %d\n", px.me, seq)
   if seq < px.minSeq {
+    fmt.Printf("[%d] status: seq %d, ignored\n", px.me, seq)
     return false, nil
   }
 
   entry, ok := px.logInstances[seq]
   if ok {
-    // fmt.Printf("status, me %d entry %v\n", px.me, entry)
+    fmt.Printf("[%d] status: seq %d, entry %v\n", px.me, seq, entry)
     return entry.status == Decided, entry.va
   }
+
   return false, nil
 }
 
