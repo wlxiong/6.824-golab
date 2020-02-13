@@ -250,6 +250,12 @@ func (px *Paxos) FindLargerNumber(n int) int {
   return num
 }
 
+func (px *Paxos) WaitForSomeMilliseconds() {
+  sleepms := rand.Intn(px.me * 10 + 1)
+  fmt.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
+  time.Sleep(time.Duration(sleepms) * time.Millisecond)
+}
+
 func (px *Paxos) DoPrepare(seq int, v interface{}) {
   px.mu.Lock()
   defer px.mu.Unlock()
@@ -284,10 +290,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   //       send decided(v') to all
 
   go func() {
-
-    sleepms := rand.Intn(px.me * 10 + 1)
-    fmt.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
-    time.Sleep(time.Duration(sleepms) * time.Millisecond)
+    px.WaitForSomeMilliseconds()
 
     decided := false
     n := px.FindLargerNumber(px.me)
@@ -341,7 +344,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         }
       }
 
-      fmt.Printf("[%d] prepare: n %d accept %d reject %d\n", px.me, n, numAccepted, numRejected)
+      fmt.Printf("[%d] prepare: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
 
       if numAccepted > numPeers / 2 {
         // success
@@ -351,9 +354,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         decided = px.DoAccept(seq, v, n)
       } else if numRejected > numPeers / 2 {
         // failure
-        sleepms := rand.Intn(px.me * 10 + 1)
-        fmt.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
-        time.Sleep(time.Duration(sleepms) * time.Millisecond)
+        px.WaitForSomeMilliseconds()
         n = px.FindLargerNumber(maxPeerNum)
         numAccepted = 0
         numRejected = 0
@@ -361,6 +362,9 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         maxPeerAcceptedNum = -1
         maxPeerNum = -1
         acceptedVal = nil
+      } else {
+        // wait before retry
+        px.WaitForSomeMilliseconds()
       }
     }
 
@@ -411,7 +415,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       }
     }
 
-    fmt.Printf("[%d] accept: n %d accept %d reject %d\n", px.me, n, numAccepted, numRejected)
+    fmt.Printf("[%d] accept: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
 
     if numAccepted > numPeers / 2 {
       // success
