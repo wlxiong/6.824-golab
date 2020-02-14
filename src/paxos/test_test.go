@@ -192,6 +192,10 @@ func TestDeaf(t *testing.T) {
   }
 
   pxa[0].Start(1, "xxx")
+  // since we do not assume a proposer alway accepts its own requests
+  // before sending them to itself and paxos 0 cannot talk to itself,
+  // so paxos 0 does not know if the instance is decided or not
+  // as a result, my code fails at the following line
   waitn(t, pxa, 1, npaxos-1)
   time.Sleep(1 * time.Second)
   if ndecided(t, pxa, 1) != npaxos - 1 {
