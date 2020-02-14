@@ -156,7 +156,11 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  if args.N >= entry.np {
+  // since the accepter unconditionally accept decided request
+  // the local np can decrease and this accepter would accept
+  // requests with higher number, but the decided value and
+  // the status would not be changed
+  if true || args.N >= entry.np {
     entry.seq = args.Seq
     entry.who = args.Peer
     entry.np = args.N
