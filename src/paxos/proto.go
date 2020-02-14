@@ -16,6 +16,8 @@ type PrepareArgs struct {
 
 type PrepareReply struct {
 	Seq int
+	Who int
+	Np int
 	Na int
 	Va interface{}
 	Err Err
@@ -31,6 +33,8 @@ type AcceptArgs struct {
 
 type AcceptReply struct {
 	Seq int
+	Who int
+	Np int
 	N int
 	Err Err
 }

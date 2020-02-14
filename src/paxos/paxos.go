@@ -40,6 +40,8 @@ type Status string
 
 type LogInstance struct {
   seq int
+  // who sent the highest prepare
+  who int
   // highest prepare seen
   np int
   // highest accept seen
@@ -64,7 +66,8 @@ type Paxos struct {
   maxSeq int
   minSeq int
   doneSeq int
-  maxPeerNum int
+  maxPrepareSeen int
+  maxPrepareOwner int
 }
 
 //
@@ -148,13 +151,14 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
+    entry = &LogInstance{ args.Seq, -1, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
   if args.N >= entry.np {
     entry.seq = args.Seq
+    entry.who = args.Peer
     entry.np = args.N
     entry.na = args.N
     entry.va = args.V
@@ -182,7 +186,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
+    entry = &LogInstance{ args.Seq, -1, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
@@ -190,13 +194,15 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
   log.Printf("[%d] handle prepare: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N > entry.np {
+    entry.who = args.Peer
     entry.np = args.N
     reply.Seq = args.Seq
     reply.Na = entry.na
     reply.Va = entry.va
     reply.Err = OK
   } else {
-    reply.Na = entry.na
+    reply.Who = entry.who
+    reply.Np = entry.np
     reply.Err = Reject
   }
 
@@ -221,7 +227,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
-    entry = &LogInstance{ args.Seq, -1, -1, nil, Unknown }
+    entry = &LogInstance{ args.Seq, -1, -1, -1, nil, Unknown }
     px.logInstances[args.Seq] = entry
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
@@ -229,6 +235,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
   log.Printf("[%d] handle accept: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N >= entry.np {
+    entry.who = args.Peer
     entry.np = args.N
     entry.na = args.N
     entry.va = args.V
@@ -236,7 +243,8 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
     reply.N = args.N
     reply.Err = OK
   } else {
-    reply.N = args.N
+    reply.Who = entry.who
+    reply.Np = entry.np
     reply.Err = Reject
   }
 
@@ -248,12 +256,18 @@ func (px *Paxos) FindLargerNumber(n int) int {
   for num <= n {
     num += 10000
   }
+  log.Printf("[%d] find larger prepare number: %d > %d", px.me, num, n)
   return num
 }
 
-func (px *Paxos) WaitForSomeMilliseconds() {
+const (
+  ShortWait = 5
+  LongWait = 100
+)
+
+func (px *Paxos) WaitForSomeMilliseconds(scale int) {
   // sleepms := rand.Intn(len(px.peers) * 3)
-  sleepms := rand.Intn(px.me * 100 + 1)
+  sleepms := (len(px.peers) - px.me) * scale
   log.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
   time.Sleep(time.Duration(sleepms) * time.Millisecond)
 }
@@ -278,7 +292,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     return
   }
 
-  px.logInstances[seq] = &LogInstance{ seq, -1, -1, nil, Working }
+  px.logInstances[seq] = &LogInstance{ seq, -1, -1, -1, nil, Working }
   px.logSeqs = append(px.logSeqs, seq)
 
   // proposer(v):
@@ -292,11 +306,11 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   //       send decided(v') to all
 
   go func() {
-    px.WaitForSomeMilliseconds()
+    px.WaitForSomeMilliseconds(ShortWait)
 
-    decided := false
     n := px.FindLargerNumber(px.me)
-    px.maxPeerNum = n
+    px.maxPrepareSeen = n
+    px.maxPrepareOwner = px.me
 
     numPeers := len(px.peers)
     numAccepted := 0
@@ -305,7 +319,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     maxPeerAcceptedNum := -1
     var acceptedVal interface {} = nil
 
-    for !px.dead && !decided {
+    for !px.dead {
       log.Printf("[%d] start a new round, seq %d, n %d\n", px.me, seq, n)
 
       func() {
@@ -331,8 +345,9 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         ok := callWithRetry(p, "Paxos.HandlePrepare", &args, &reply, 5)
         if ok {
           peerStatus[p] = reply.Err
-          if px.maxPeerNum < reply.Na {
-            px.maxPeerNum = reply.Na
+          if px.maxPrepareSeen < reply.Np {
+            px.maxPrepareSeen = reply.Np
+            px.maxPrepareOwner = reply.Who
           }
           if reply.Err == OK {
             numAccepted += 1
@@ -348,45 +363,34 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
 
       log.Printf("[%d] prepare: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
 
+      commitFailed := false
       if numAccepted > numPeers / 2 {
         // success
         if acceptedVal != nil {
           v = acceptedVal
         }
-        decided = px.DoAccept(seq, v, n)
+        ok := px.DoAccept(seq, v, n)
+        if ok { break }
+        commitFailed = true
       }
 
-      if !decided {
-        // not decided yet
-        px.WaitForSomeMilliseconds()
-        if numRejected > 0 {
-          n = px.FindLargerNumber(px.maxPeerNum)
-          numAccepted = 0
-          numRejected = 0
-          peerStatus = make(map[string]Err)
-          maxPeerAcceptedNum = -1
-          acceptedVal = nil
+      // not decided yet
+      px.WaitForSomeMilliseconds(ShortWait)
+      if commitFailed || numRejected > 0 {
+        // do a long wait if the competing proposer is greater than me
+        if px.maxPrepareOwner > px.me {
+          px.WaitForSomeMilliseconds(LongWait)
         }
+        n = px.FindLargerNumber(px.maxPrepareSeen)
+        numAccepted = 0
+        numRejected = 0
+        peerStatus = make(map[string]Err)
+        maxPeerAcceptedNum = -1
+        acceptedVal = nil
       }
     }
 
-    // decided
-    numAcked := 0
-    peerStatus = make(map[string]Err)
-    args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
-    for !px.dead && numAcked < numPeers {
-      for _, p := range px.peers {
-        err, ok := peerStatus[p]
-        if ok && err == OK { continue }
-        var reply DecidedReply
-        ok = call(p, "Paxos.HandleDecided", &args, &reply)
-        if ok {
-          numAcked += 1
-          peerStatus[p] = reply.Err
-        }
-      }
-    }
-
+    px.DoNotify(seq, v, n)
   }()
 }
 
@@ -409,8 +413,9 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       ok = callWithRetry(p, "Paxos.HandleAccept", &args, &reply, 5)
       if ok {
         peerStatus[p] = reply.Err
-        if px.maxPeerNum < reply.N {
-          px.maxPeerNum = reply.N
+        if px.maxPrepareSeen < reply.Np {
+          px.maxPrepareSeen = reply.Np
+          px.maxPrepareOwner = reply.Who
         }
         if reply.Err == OK {
           numAccepted += 1
@@ -432,6 +437,29 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
   }
 
   return false
+}
+
+func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
+  // decided
+  numPeers := len(px.peers)
+  numNotified := 0
+  peerStatus := make(map[string]Err)
+
+  args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
+  for !px.dead && numNotified < numPeers {
+    for _, p := range px.peers {
+      err, ok := peerStatus[p]
+      if ok && err == OK { continue }
+      var reply DecidedReply
+      ok = call(p, "Paxos.HandleDecided", &args, &reply)
+      if ok {
+        numNotified += 1
+        peerStatus[p] = reply.Err
+      }
+    }
+  }
+
+  return true
 }
 
 //
