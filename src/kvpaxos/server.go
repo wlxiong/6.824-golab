@@ -10,12 +10,28 @@ import "os"
 import "syscall"
 import "encoding/gob"
 import "math/rand"
+import "time"
 
+const (
+  OpRead = 0
+  OpWrite = 1
+)
+
+type OpType int
 
 type Op struct {
   // Your definitions here.
   // Field names must start with capital letters,
   // otherwise RPC will break.
+  ReqId int64
+  OpType OpType
+  Key string
+  Value string
+}
+
+type PendingRead struct {
+  seq int
+  done chan string
 }
 
 type KVPaxos struct {
@@ -27,22 +43,60 @@ type KVPaxos struct {
   px *paxos.Paxos
 
   // Your definitions here.
+  data map[string]string
+  // the seq number of the latest applied log instance
+  applied int
+  // pending read requests
+  pending []PendingRead
 }
 
+func (kv *KVPaxos) WaitLog(seq int) Op {
+  sleepms := 10 * time.Millisecond
+  for {
+    decided, val := kv.px.Status(seq)
+    if decided {
+      op, ok := val.(Op)
+      if ok {
+        return op
+      }
+    }
 
+    time.Sleep(sleepms)
+    if sleepms < 10 * time.Second {
+      sleepms *= 2
+    }
+  }
+}
+
+func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) {
+  for {
+    maxSeq := kv.px.Max()
+    nextSeq := maxSeq + 1
+    op := Op{ reqId, opType, key, val }
+    kv.px.Start(nextSeq, op)
+    committed := kv.WaitLog(nextSeq)
+    if op.ReqId == committed.ReqId {
+      break
+    }
+  }
+}
+
+func (kv *KVPaxos) StartBackgroundWorker() {
+  go func() {
+
+  }()
+}
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
-  // Your code here.
-
+  kv.AppendOp(args.ReqId, OpRead, args.Key, "")
 
   return nil
 }
 
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
-  // Your code here.
-
-
+  kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
+  reply.Err = OK
   return nil
 }
 
@@ -70,6 +124,8 @@ func StartServer(servers []string, me int) *KVPaxos {
   kv.me = me
 
   // Your initialization code here.
+  kv.data = make(map[string]string)
+  kv.applied = -1
 
   rpcs := rpc.NewServer()
   rpcs.Register(kv)

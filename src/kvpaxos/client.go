@@ -3,6 +3,8 @@ package kvpaxos
 import "net/rpc"
 import "time"
 
+import "math/rand"
+
 type Clerk struct {
   servers []string
   // You will have to modify this struct.
@@ -53,13 +55,18 @@ func call(srv string, rpcname string,
 // keeps trying forever in the face of all other errors.
 //
 func (ck *Clerk) Get(key string) string {
-  // You will have to modify this function.
 
   for {
     // try each known server.
     for _, srv := range ck.servers {
+      // generate an new id for each read request
+      // there can be multiple read ops on the log
+      // but the client only need to return the first
+      // one it receives from the server
+      reqId := rand.Int63n(time.Now().UnixNano())
       args := &GetArgs{}
       args.Key = key
+      args.ReqId = reqId
       var reply GetReply
       ok := call(srv, "KVPaxos.Get", args, &reply)
       if ok && (reply.Err == OK || reply.Err == ErrNoKey) {
@@ -68,6 +75,7 @@ func (ck *Clerk) Get(key string) string {
     }
     time.Sleep(100 * time.Millisecond)
   }
+
   return ""
 }
 
@@ -76,13 +84,15 @@ func (ck *Clerk) Get(key string) string {
 // keeps trying until it succeeds.
 //
 func (ck *Clerk) Put(key string, value string) {
-  // You will have to modify this function.
+  // a unique id is generated to make sure that the write only happens once
+  reqId := rand.Int63n(time.Now().UnixNano())
 
   for {
     for _, srv := range ck.servers {
       args := &PutArgs{}
       args.Key = key
       args.Value = value
+      args.ReqId = reqId
       var reply PutReply
       ok := call(srv, "KVPaxos.Put", args, &reply)
       if ok && reply.Err == OK {

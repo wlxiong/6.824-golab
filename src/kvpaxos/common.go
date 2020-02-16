@@ -10,6 +10,7 @@ type PutArgs struct {
   // You'll have to add definitions here.
   Key string
   Value string
+  ReqId int64
 }
 
 type PutReply struct {
@@ -19,6 +20,7 @@ type PutReply struct {
 type GetArgs struct {
   // You'll have to add definitions here.
   Key string
+  ReqId int64
 }
 
 type GetReply struct {
