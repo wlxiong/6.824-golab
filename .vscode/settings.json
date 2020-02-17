@@ -1,0 +1,14 @@
+{
+    "go.useLanguageServer": true,
+    "go.lintOnSave": "off",
+    "go.vetOnSave": "off",
+    "go.buildOnSave": "off",
+    "[go]": {
+        "editor.formatOnSave": false,
+        // https://github.com/Microsoft/language-server-protocol/issues/726
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": false,
+            "source.fixAll": false
+        }
+    },
+}
