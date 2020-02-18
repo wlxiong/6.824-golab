@@ -13,9 +13,10 @@ import "math/rand"
 import "time"
 
 const (
-  OpRead = 0
-  OpWrite = 1
-  OpCount = 2
+  OpInvalid = 0
+  OpRead = 1
+  OpWrite = 2
+  OpCount = 3
 )
 
 type OpType int
@@ -131,7 +132,7 @@ func (kv *KVPaxos) RemovePendingRead(reqId int64) *PendingRead {
 func (kv *KVPaxos) GetMinSeqOfUncommittedRead() int {
   kv.mu.Lock()
   defer kv.mu.Unlock()
-  minSeq := kv.px.Max()
+  minSeq := kv.px.Max() + 1
   for _, pendingRead := range kv.pendingRead {
     if pendingRead.commited { continue }
     if minSeq < 0 || minSeq > pendingRead.seq {
@@ -142,8 +143,8 @@ func (kv *KVPaxos) GetMinSeqOfUncommittedRead() int {
 }
 
 func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) int {
+  op := Op{ reqId, opType, key, val }
   for !kv.dead {
-    op := Op{ reqId, opType, key, val }
     seq := kv.AssignNewSeqToNewRequest(reqId, opType)
     kv.px.Start(seq, op)
     ok, committed := kv.WaitLog(seq, 0)
@@ -160,13 +161,16 @@ func (kv *KVPaxos) StartBackgroundWorker() {
     for !kv.dead {
       uncommitted := kv.GetMinSeqOfUncommittedRead()
       log.Printf("[%d] uncommitted seq: %d", kv.me, uncommitted)
-      for seq := kv.applied + 1; seq < uncommitted; seq++ {
-        ok, op := kv.WaitLog(seq, 500 * time.Millisecond)
+      for seq := kv.applied + 1; seq <= uncommitted; seq++ {
+        ok, op := kv.WaitLog(seq, 5 * time.Second)
         log.Printf("[%d] operation %+v", kv.me, op)
         if ok {
           if op.OpType == OpRead {
             pendingRead := kv.GetPendingRead(op.ReqId)
+            if pendingRead == nil { continue }
+            log.Printf("[%d] pending read %+v", kv.me, pendingRead)
             val, ok := kv.data[op.Key]
+            log.Printf("[%d] read key %s val %s", kv.me, op.Key, val)
             if ok {
               pendingRead.done <- &val
             } else {
@@ -174,6 +178,7 @@ func (kv *KVPaxos) StartBackgroundWorker() {
             }
           } else if op.OpType == OpWrite {
             kv.data[op.Key] = op.Value
+            log.Printf("[%d] write key %s val %s", kv.me, op.Key, op.Value)
           }
         } else {
           kv.px.Start(seq, nil)
@@ -185,8 +190,9 @@ func (kv *KVPaxos) StartBackgroundWorker() {
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
+  log.Printf("[%d] GET request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpRead, args.Key, "")
-  log.Printf("[%d] append get, seq %d, key %s", kv.me, seq, args.Key)
+  log.Printf("[%d] GET committed, seq %d, key %s", kv.me, seq, args.Key)
   pendingRead := kv.MarkPendingReadCommitted(args.ReqId)
   val := <- pendingRead.done
   kv.RemovePendingRead(args.ReqId)
@@ -200,8 +206,9 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
+  log.Printf("[%d] PUT request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
-  log.Printf("[%d] append put, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
+  log.Printf("[%d] PUT committed, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
   reply.Err = OK
   return nil
 }
