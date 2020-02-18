@@ -157,7 +157,7 @@ func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) 
 
 func (kv *KVPaxos) StartBackgroundWorker() {
   go func() {
-    log.Printf("[%d] background worker started", kv.me)
+    log.Printf("[kv][%d] background worker started", kv.me)
     writeSeen := make(map[int64]bool)
     for !kv.dead {
       uncommitted := kv.GetMinSeqOfUncommittedRead()
@@ -169,9 +169,9 @@ func (kv *KVPaxos) StartBackgroundWorker() {
           if op.OpType == OpRead {
             pendingRead := kv.GetPendingRead(op.ReqId)
             if pendingRead == nil { continue }
-            log.Printf("[%d] pending read %+v", kv.me, pendingRead)
+            log.Printf("[kv][%d] pending read %+v", kv.me, pendingRead)
             val, ok := kv.data[op.Key]
-            log.Printf("[%d] read key %s val %s", kv.me, op.Key, val)
+            log.Printf("[kv][%d] read key %s val %s", kv.me, op.Key, val)
             if ok {
               pendingRead.done <- &val
             } else {
@@ -179,12 +179,14 @@ func (kv *KVPaxos) StartBackgroundWorker() {
             }
           } else if op.OpType == OpWrite {
             if writeSeen[op.ReqId] {
-              log.Printf("[%d] duplicate write key %s val %s", kv.me, op.Key, op.Value)
+              log.Printf("[kv][%d] duplicate write key %s val %s", kv.me, op.Key, op.Value)
             } else {
               kv.data[op.Key] = op.Value
               writeSeen[op.ReqId] = true
-              log.Printf("[%d] write key %s val %s", kv.me, op.Key, op.Value)
+              log.Printf("[kv][%d] write key %s val %s", kv.me, op.Key, op.Value)
             }
+          } else {
+            log.Printf("[kv][%d] committed invalid op %+v seq %d", kv.me, op, seq)
           }
         } else {
           kv.px.Start(seq, nil)
@@ -196,9 +198,9 @@ func (kv *KVPaxos) StartBackgroundWorker() {
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
-  log.Printf("[%d] GET request %+v", kv.me, args)
+  log.Printf("[kv][%d] GET request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpRead, args.Key, "")
-  log.Printf("[%d] GET committed, seq %d, key %s", kv.me, seq, args.Key)
+  log.Printf("[kv][%d] GET committed, seq %d, key %s", kv.me, seq, args.Key)
   pendingRead := kv.MarkPendingReadCommitted(args.ReqId)
   val := <- pendingRead.done
   kv.RemovePendingRead(args.ReqId)
@@ -212,9 +214,9 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
-  log.Printf("[%d] PUT request %+v", kv.me, args)
+  log.Printf("[kv][%d] PUT request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
-  log.Printf("[%d] PUT committed, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
+  log.Printf("[kv][%d] PUT committed, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
   reply.Err = OK
   return nil
 }

@@ -169,7 +169,7 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
     entry.status = Decided
   }
 
-  log.Printf("[%d] handle decided: args %+v entry %+v\n", px.me, args, entry)
+  log.Printf("[px][%d] handle decided: args %+v entry %+v\n", px.me, args, entry)
 
   reply.Err = OK
   return nil
@@ -195,7 +195,7 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  log.Printf("[%d] handle prepare: args %+v entry %+v\n", px.me, args, entry)
+  log.Printf("[px][%d] handle prepare: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N > entry.np {
     entry.who = args.Peer
@@ -236,7 +236,7 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
     px.logSeqs = append(px.logSeqs, args.Seq)
   }
 
-  log.Printf("[%d] handle accept: args %+v entry %+v\n", px.me, args, entry)
+  log.Printf("[px][%d] handle accept: args %+v entry %+v\n", px.me, args, entry)
 
   if args.N >= entry.np {
     entry.who = args.Peer
@@ -260,7 +260,7 @@ func (px *Paxos) FindLargerNumber(n int) int {
   for num <= n {
     num += 10000
   }
-  log.Printf("[%d] find larger prepare number: %d > %d", px.me, num, n)
+  log.Printf("[px][%d] find larger prepare number: %d > %d", px.me, num, n)
   return num
 }
 
@@ -272,7 +272,7 @@ const (
 func (px *Paxos) WaitForSomeMilliseconds(scale int) {
   // sleepms := rand.Intn(len(px.peers) * 3)
   sleepms := (len(px.peers) - px.me) * scale
-  log.Printf("[%d] wait for %d ms...\n", px.me, sleepms)
+  log.Printf("[px][%d] wait for %d ms...\n", px.me, sleepms)
   time.Sleep(time.Duration(sleepms) * time.Millisecond)
 }
 
@@ -287,10 +287,10 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   entry, ok := px.logInstances[seq]
   if ok {
     if entry.status == Working {
-      log.Printf("working on seq %d", seq)
+      log.Printf("[px][%d] working on seq %d", px.me, seq)
       return
     } else if entry.status == Decided {
-      log.Printf("already decided seq %d", seq)
+      log.Printf("[px][%d] already decided seq %d", px.me, seq)
       return
     }
     return
@@ -324,7 +324,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     var acceptedVal interface {} = nil
 
     for !px.dead {
-      log.Printf("[%d] start a new round, seq %d, n %d\n", px.me, seq, n)
+      log.Printf("[px][%d] start a new round, seq %d, n %d\n", px.me, seq, n)
 
       func() {
         px.mu.Lock()
@@ -333,7 +333,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
       }()
 
       if ok && entry.status == Decided {
-        log.Printf("[%d] already decided, entry %+v\n", px.me, entry)
+        log.Printf("[px][%d] already decided, entry %+v\n", px.me, entry)
         return
       }
 
@@ -365,7 +365,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
         }
       }
 
-      log.Printf("[%d] prepare: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
+      log.Printf("[px][%d] prepare: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
 
       commitFailed := false
       if numAccepted > numPeers / 2 {
@@ -429,7 +429,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       }
     }
 
-    log.Printf("[%d] accept: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
+    log.Printf("[px][%d] accept: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
 
     if numAccepted > numPeers / 2 {
       // success
@@ -455,7 +455,7 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
       err, ok := peerStatus[p]
       if ok && err == OK { continue }
       var reply DecidedReply
-      ok = call(p, "Paxos.HandleDecided", &args, &reply)
+      ok = callWithRetry(p, "Paxos.HandleDecided", &args, &reply, 5)
       if ok {
         numNotified += 1
         peerStatus[p] = reply.Err
@@ -474,7 +474,7 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
 // is reached.
 //
 func (px *Paxos) Start(seq int, v interface{}) {
-  log.Printf("[%d] start: seq %d v %v\n", px.me, seq, v)
+  log.Printf("[px][%d] start: seq %d v %v\n", px.me, seq, v)
   px.DoPrepare(seq, v)
 }
 
@@ -487,7 +487,7 @@ func (px *Paxos) Start(seq int, v interface{}) {
 func (px *Paxos) Done(seq int) {
   px.mu.Lock()
   defer px.mu.Unlock()
-  log.Printf("[%d] done: seq %d\n", px.me, seq)
+  log.Printf("[px][%d] done: seq %d\n", px.me, seq)
   if seq > px.doneSeq {
     px.doneSeq = seq
   }
@@ -501,7 +501,7 @@ func (px *Paxos) Done(seq int) {
 func (px *Paxos) Max() int {
   px.mu.Lock()
   defer px.mu.Unlock()
-  log.Printf("[%d] max: maxseq %d\n", px.me, px.maxSeq)
+  log.Printf("[px][%d] max: maxseq %d\n", px.me, px.maxSeq)
   return px.maxSeq
 }
 
@@ -539,7 +539,7 @@ func (px *Paxos) Max() int {
 func (px *Paxos) Min() int {
   px.mu.Lock()
   defer px.mu.Unlock()
-  log.Printf("[%d] min: minseq %d\n", px.me, px.minSeq)
+  log.Printf("[px][%d] min: minseq %d\n", px.me, px.minSeq)
   return px.minSeq
 }
 
@@ -555,13 +555,13 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
   defer px.mu.Unlock()
 
   if seq < px.minSeq {
-    log.Printf("[%d] status: seq %d, ignored\n", px.me, seq)
+    log.Printf("[px][%d] status: seq %d, ignored\n", px.me, seq)
     return false, nil
   }
 
   entry, ok := px.logInstances[seq]
   if ok {
-    log.Printf("[%d] status: seq %d, entry %+v\n", px.me, seq, entry)
+    log.Printf("[px][%d] status: seq %d, entry %+v\n", px.me, seq, entry)
     return entry.status == Decided, entry.va
   }
 
