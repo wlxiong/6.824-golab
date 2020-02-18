@@ -158,6 +158,7 @@ func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) 
 func (kv *KVPaxos) StartBackgroundWorker() {
   go func() {
     log.Printf("[%d] background worker started", kv.me)
+    writeSeen := make(map[int64]bool)
     for !kv.dead {
       uncommitted := kv.GetMinSeqOfUncommittedRead()
       log.Printf("[%d] uncommitted seq: %d", kv.me, uncommitted)
@@ -177,8 +178,13 @@ func (kv *KVPaxos) StartBackgroundWorker() {
               pendingRead.done <- nil
             }
           } else if op.OpType == OpWrite {
-            kv.data[op.Key] = op.Value
-            log.Printf("[%d] write key %s val %s", kv.me, op.Key, op.Value)
+            if writeSeen[op.ReqId] {
+              log.Printf("[%d] duplicate write key %s val %s", kv.me, op.Key, op.Value)
+            } else {
+              kv.data[op.Key] = op.Value
+              writeSeen[op.ReqId] = true
+              log.Printf("[%d] write key %s val %s", kv.me, op.Key, op.Value)
+            }
           }
         } else {
           kv.px.Start(seq, nil)
