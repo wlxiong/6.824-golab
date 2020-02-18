@@ -30,8 +30,10 @@ type Op struct {
 }
 
 type PendingRead struct {
+  reqId int64
   seq int
-  done chan string
+  commited bool
+  done chan *string
 }
 
 type KVPaxos struct {
@@ -47,7 +49,7 @@ type KVPaxos struct {
   // the seq number of the latest applied log instance
   applied int
   // pending read requests
-  pending []PendingRead
+  pendingRead map[int64]*PendingRead
 }
 
 func (kv *KVPaxos) WaitLog(seq int) Op {
@@ -68,11 +70,54 @@ func (kv *KVPaxos) WaitLog(seq int) Op {
   }
 }
 
+func (kv *KVPaxos) AddOrUpdatePendingRead(reqId int64, seq int) {
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+  pendingRead, ok := kv.pendingRead[reqId]
+  if ok {
+    pendingRead.seq = seq
+    return
+  }
+  kv.pendingRead[reqId] = &PendingRead{ reqId, seq, false, make(chan *string) }
+}
+
+func (kv *KVPaxos) MarkPendingReadCommitted(reqId int64) *PendingRead {
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+  pendingRead, ok := kv.pendingRead[reqId]
+  if ok {
+    pendingRead.commited = true
+  }
+  return pendingRead
+}
+
+func (kv *KVPaxos) RemovePendingRead(reqId int64) *PendingRead {
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+  pendingRead := kv.pendingRead[reqId]
+  delete(kv.pendingRead, reqId)
+  return pendingRead
+}
+
+func (kv *KVPaxos) GetMinSeqOfUncommittedRead(reqId int64) int {
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+  minSeq := kv.px.Max()
+  for _, pendingRead := range kv.pendingRead {
+    if pendingRead.commited { continue }
+    if minSeq < 0 || minSeq > pendingRead.seq {
+      minSeq = pendingRead.seq
+    }
+  }
+  return minSeq
+}
+
 func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) {
   for {
     maxSeq := kv.px.Max()
     nextSeq := maxSeq + 1
     op := Op{ reqId, opType, key, val }
+    if opType == OpRead { kv.AddOrUpdatePendingRead(reqId, nextSeq) }
     kv.px.Start(nextSeq, op)
     committed := kv.WaitLog(nextSeq)
     if op.ReqId == committed.ReqId {
@@ -89,10 +134,17 @@ func (kv *KVPaxos) StartBackgroundWorker() {
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   kv.AppendOp(args.ReqId, OpRead, args.Key, "")
-
+  pendingRead := kv.MarkPendingReadCommitted(args.ReqId)
+  val := <- pendingRead.done
+  kv.RemovePendingRead(args.ReqId)
+  if val != nil {
+    reply.Value = *val
+    reply.Err = OK
+  } else {
+    reply.Err = ErrNoKey
+  }
   return nil
 }
-
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
