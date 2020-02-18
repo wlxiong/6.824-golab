@@ -15,6 +15,7 @@ import "time"
 const (
   OpRead = 0
   OpWrite = 1
+  OpCount = 2
 )
 
 type OpType int
@@ -52,22 +53,38 @@ type KVPaxos struct {
   pendingRead map[int64]*PendingRead
 }
 
-func (kv *KVPaxos) WaitLog(seq int) Op {
+func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, Op) {
+  start := time.Now()
   sleepms := 10 * time.Millisecond
-  for {
+  for !kv.dead {
     decided, val := kv.px.Status(seq)
     if decided {
       op, ok := val.(Op)
       if ok {
-        return op
+        return true, op
+      }
+    }
+
+    if timeout > 0 {
+      now := time.Now()
+      elasped := now.Sub(start)
+      if elasped.Milliseconds() >= timeout.Milliseconds() {
+        return false, Op{ -1, OpCount, "", "" }
+      }
+
+      remaining := timeout - elasped
+      if sleepms > remaining {
+        sleepms = remaining
       }
     }
 
     time.Sleep(sleepms)
-    if sleepms < 10 * time.Second {
+    if sleepms < time.Second {
       sleepms *= 2
     }
   }
+
+  return false, Op{ -1, OpCount, "", "" }
 }
 
 func (kv *KVPaxos) AssignNewSeqToNewRequest(reqId int64, opType OpType) int {
@@ -96,6 +113,13 @@ func (kv *KVPaxos) MarkPendingReadCommitted(reqId int64) *PendingRead {
   return pendingRead
 }
 
+func (kv *KVPaxos) GetPendingRead(reqId int64) *PendingRead {
+  kv.mu.Lock()
+  defer kv.mu.Unlock()
+  pendingRead := kv.pendingRead[reqId]
+  return pendingRead
+}
+
 func (kv *KVPaxos) RemovePendingRead(reqId int64) *PendingRead {
   kv.mu.Lock()
   defer kv.mu.Unlock()
@@ -117,26 +141,52 @@ func (kv *KVPaxos) GetMinSeqOfUncommittedRead() int {
   return minSeq
 }
 
-func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) {
-  for {
+func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) int {
+  for !kv.dead {
     op := Op{ reqId, opType, key, val }
     seq := kv.AssignNewSeqToNewRequest(reqId, opType)
     kv.px.Start(seq, op)
-    committed := kv.WaitLog(seq)
-    if op.ReqId == committed.ReqId {
-      break
+    ok, committed := kv.WaitLog(seq, 0)
+    if ok && op.ReqId == committed.ReqId {
+      return seq
     }
   }
+  return -1
 }
 
 func (kv *KVPaxos) StartBackgroundWorker() {
   go func() {
-
+    log.Printf("[%d] background worker started", kv.me)
+    for !kv.dead {
+      uncommitted := kv.GetMinSeqOfUncommittedRead()
+      log.Printf("[%d] uncommitted seq: %d", kv.me, uncommitted)
+      for seq := kv.applied + 1; seq < uncommitted; seq++ {
+        ok, op := kv.WaitLog(seq, 500 * time.Millisecond)
+        log.Printf("[%d] operation %+v", kv.me, op)
+        if ok {
+          if op.OpType == OpRead {
+            pendingRead := kv.GetPendingRead(op.ReqId)
+            val, ok := kv.data[op.Key]
+            if ok {
+              pendingRead.done <- &val
+            } else {
+              pendingRead.done <- nil
+            }
+          } else if op.OpType == OpWrite {
+            kv.data[op.Key] = op.Value
+          }
+        } else {
+          kv.px.Start(seq, nil)
+        }
+      }
+      kv.applied = uncommitted
+    }
   }()
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
-  kv.AppendOp(args.ReqId, OpRead, args.Key, "")
+  seq := kv.AppendOp(args.ReqId, OpRead, args.Key, "")
+  log.Printf("[%d] append get, seq %d, key %s", kv.me, seq, args.Key)
   pendingRead := kv.MarkPendingReadCommitted(args.ReqId)
   val := <- pendingRead.done
   kv.RemovePendingRead(args.ReqId)
@@ -150,7 +200,8 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
-  kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
+  seq := kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
+  log.Printf("[%d] append put, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
   reply.Err = OK
   return nil
 }
@@ -187,6 +238,9 @@ func StartServer(servers []string, me int) *KVPaxos {
   rpcs.Register(kv)
 
   kv.px = paxos.Make(servers, me, rpcs)
+
+  // start worker
+  kv.StartBackgroundWorker()
 
   os.Remove(servers[me])
   l, e := net.Listen("unix", servers[me]);
