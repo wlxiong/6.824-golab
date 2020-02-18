@@ -70,15 +70,20 @@ func (kv *KVPaxos) WaitLog(seq int) Op {
   }
 }
 
-func (kv *KVPaxos) AddOrUpdatePendingRead(reqId int64, seq int) {
+func (kv *KVPaxos) AssignNewSeqToNewRequest(reqId int64, opType OpType) int {
   kv.mu.Lock()
   defer kv.mu.Unlock()
-  pendingRead, ok := kv.pendingRead[reqId]
-  if ok {
-    pendingRead.seq = seq
-    return
+  maxSeq := kv.px.Max()
+  nextSeq := maxSeq + 1
+  if opType == OpRead {
+    pendingRead, ok := kv.pendingRead[reqId]
+    if ok {
+      pendingRead.seq = nextSeq
+    } else {
+      kv.pendingRead[reqId] = &PendingRead{ reqId, nextSeq, false, make(chan *string) }
+    }
   }
-  kv.pendingRead[reqId] = &PendingRead{ reqId, seq, false, make(chan *string) }
+  return nextSeq
 }
 
 func (kv *KVPaxos) MarkPendingReadCommitted(reqId int64) *PendingRead {
@@ -99,7 +104,7 @@ func (kv *KVPaxos) RemovePendingRead(reqId int64) *PendingRead {
   return pendingRead
 }
 
-func (kv *KVPaxos) GetMinSeqOfUncommittedRead(reqId int64) int {
+func (kv *KVPaxos) GetMinSeqOfUncommittedRead() int {
   kv.mu.Lock()
   defer kv.mu.Unlock()
   minSeq := kv.px.Max()
@@ -114,12 +119,10 @@ func (kv *KVPaxos) GetMinSeqOfUncommittedRead(reqId int64) int {
 
 func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) {
   for {
-    maxSeq := kv.px.Max()
-    nextSeq := maxSeq + 1
     op := Op{ reqId, opType, key, val }
-    if opType == OpRead { kv.AddOrUpdatePendingRead(reqId, nextSeq) }
-    kv.px.Start(nextSeq, op)
-    committed := kv.WaitLog(nextSeq)
+    seq := kv.AssignNewSeqToNewRequest(reqId, opType)
+    kv.px.Start(seq, op)
+    committed := kv.WaitLog(seq)
     if op.ReqId == committed.ReqId {
       break
     }
@@ -177,6 +180,7 @@ func StartServer(servers []string, me int) *KVPaxos {
 
   // Your initialization code here.
   kv.data = make(map[string]string)
+  kv.pendingRead = make(map[int64]*PendingRead)
   kv.applied = -1
 
   rpcs := rpc.NewServer()
