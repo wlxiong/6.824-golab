@@ -13,13 +13,12 @@ import "math/rand"
 import "time"
 
 const (
-  OpInvalid = 0
-  OpRead = 1
-  OpWrite = 2
-  OpCount = 3
+  OpInvalid = "OpInvalid"
+  OpRead = "OpRead"
+  OpWrite = "OpWrite"
 )
 
-type OpType int
+type OpType string
 
 type Op struct {
   // Your definitions here.
@@ -57,20 +56,19 @@ type KVPaxos struct {
 func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, Op) {
   start := time.Now()
   sleepms := 10 * time.Millisecond
+  maxsleep := time.Second
   for !kv.dead {
     decided, val := kv.px.Status(seq)
+    op, _ := val.(Op)
     if decided {
-      op, ok := val.(Op)
-      if ok {
         return true, op
-      }
     }
 
     if timeout > 0 {
       now := time.Now()
       elasped := now.Sub(start)
       if elasped.Milliseconds() >= timeout.Milliseconds() {
-        return false, Op{ -1, OpCount, "", "" }
+        return false, op
       }
 
       remaining := timeout - elasped
@@ -80,12 +78,12 @@ func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, Op) {
     }
 
     time.Sleep(sleepms)
-    if sleepms < time.Second {
+    if sleepms < maxsleep {
       sleepms *= 2
     }
   }
 
-  return false, Op{ -1, OpCount, "", "" }
+  return false, Op{ -1, OpInvalid, "", "" }
 }
 
 func (kv *KVPaxos) AssignNewSeqToNewRequest(reqId int64, opType OpType) int {
@@ -133,12 +131,15 @@ func (kv *KVPaxos) GetMinSeqOfUncommittedRead() int {
   kv.mu.Lock()
   defer kv.mu.Unlock()
   minSeq := kv.px.Max() + 1
+  var minPendingRead *PendingRead = nil
   for _, pendingRead := range kv.pendingRead {
     if pendingRead.commited { continue }
     if minSeq < 0 || minSeq > pendingRead.seq {
       minSeq = pendingRead.seq
+      minPendingRead = pendingRead
     }
   }
+  log.Printf("[kv][%d] min uncommitted read %+v", kv.me, minPendingRead)
   return minSeq
 }
 
@@ -160,12 +161,18 @@ func (kv *KVPaxos) StartBackgroundWorker() {
     log.Printf("[kv][%d] background worker started", kv.me)
     writeSeen := make(map[int64]bool)
     for !kv.dead {
-      uncommitted := kv.GetMinSeqOfUncommittedRead()
-      log.Printf("[%d] uncommitted seq: %d", kv.me, uncommitted)
+      uncommitted := -1
+      for {
+        uncommitted = kv.GetMinSeqOfUncommittedRead()
+        if kv.applied < uncommitted { break }
+        time.Sleep(10 * time.Millisecond)
+      }
+      log.Printf("[kv][%d] applied seq %d, min uncommitted seq %d", kv.me, kv.applied, uncommitted)
       for seq := kv.applied + 1; seq <= uncommitted; seq++ {
-        ok, op := kv.WaitLog(seq, 5 * time.Second)
-        log.Printf("[%d] operation %+v", kv.me, op)
-        if ok {
+        log.Printf("[kv][%d] wait for operation, seq %d", kv.me, seq)
+        decided, op := kv.WaitLog(seq, 100 * time.Millisecond)
+        log.Printf("[kv][%d] get an operation %+v, decided %v, seq %d", kv.me, op, decided, seq)
+        if decided {
           if op.OpType == OpRead {
             pendingRead := kv.GetPendingRead(op.ReqId)
             if pendingRead == nil { continue }
@@ -189,7 +196,16 @@ func (kv *KVPaxos) StartBackgroundWorker() {
             log.Printf("[kv][%d] committed invalid op %+v seq %d", kv.me, op, seq)
           }
         } else {
-          kv.px.Start(seq, nil)
+          // (1) if seq is greater than Max(), it could be a blank log instance
+          //     simply spend more time waiting for its completion
+          // (2) if seq is less or equal to Max(), it is an uncommitted log instance
+          //     the original proposer may have network issue, re-propose it to push forward
+          if seq <= kv.px.Max() {
+            log.Printf("[kv][%d] re-propose uncommitted op %+v seq %d", kv.me, op, seq)
+            kv.px.Start(seq, op)
+          }
+          // wait for the same log instance in the next loop
+          seq--
         }
       }
       kv.applied = uncommitted
