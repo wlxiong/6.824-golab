@@ -195,6 +195,7 @@ func (kv *KVPaxos) StartBackgroundWorker() {
           } else {
             log.Printf("[kv][%d] committed invalid op %+v seq %d", kv.me, op, seq)
           }
+          kv.px.Done(seq)
         } else {
           // (1) if seq is greater than Max(), it could be a blank log instance
           //     simply spend more time waiting for its completion
