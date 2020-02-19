@@ -91,7 +91,7 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
   if err != nil {
     err1 := err.(*net.OpError)
     if err1.Err != syscall.ENOENT && err1.Err != syscall.ECONNREFUSED {
-      fmt.Printf("paxos Dial() failed: %v\n", err1)
+      // fmt.Printf("paxos Dial() failed: %v\n", err1)
     }
     return false
   }
@@ -281,6 +281,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   defer px.mu.Unlock()
 
   if seq < px.minSeq {
+    log.Printf("[px][%d] seq %d is smaller than min seq %d", px.me, seq, px.minSeq)
     return
   }
 
@@ -292,12 +293,16 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
     } else if entry.status == Decided {
       log.Printf("[px][%d] already decided seq %d", px.me, seq)
       return
+    } else if entry.status == Unknown {
+      log.Printf("[px][%d] re-propose uncommitted entry %+v, seq %d", px.me, entry, seq)
+      entry.status = Working
+    } else {
+      panic(fmt.Sprintf("Unknown entry status %v", entry.status))
     }
-    return
+  } else {
+    px.logInstances[seq] = &LogInstance{ seq, -1, -1, -1, nil, Working }
+    px.logSeqs = append(px.logSeqs, seq)
   }
-
-  px.logInstances[seq] = &LogInstance{ seq, -1, -1, -1, nil, Working }
-  px.logSeqs = append(px.logSeqs, seq)
 
   // proposer(v):
   // while not decided:
