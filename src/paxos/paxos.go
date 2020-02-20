@@ -149,6 +149,12 @@ func (px *Paxos) HandleDecided(args *DecidedArgs, reply *DecidedReply) error {
 
   px.UpdatePeerSeq(args.Peer, args.Seq, args.DoneSeq)
 
+  if args.Seq < px.minSeq {
+    log.Printf("[px][%d] ignore decided, seq %d < min seq %d", px.me, args.Seq, px.minSeq)
+    reply.Err = Reject
+    return nil
+  }
+
   entry, ok := px.logInstances[args.Seq]
   if !ok {
     entry = &LogInstance{ args.Seq, -1, -1, -1, nil, Unknown }
@@ -187,6 +193,12 @@ func (px *Paxos) HandlePrepare(args *PrepareArgs, reply *PrepareReply) error {
   //   reply prepare_ok(n_a, v_a)
   // else
   //   reply prepare_reject
+
+  if args.Seq < px.minSeq {
+    log.Printf("[px][%d] ignore prepare, seq %d < min seq %d", px.me, args.Seq, px.minSeq)
+    reply.Err = Reject
+    return nil
+  }
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
@@ -228,6 +240,12 @@ func (px *Paxos) HandleAccept(args *AcceptArgs, reply *AcceptReply) error {
   //     reply accept_ok(n)
   //   else
   //     reply accept_reject
+
+  if args.Seq < px.minSeq {
+    log.Printf("[px][%d] ignore accept, seq %d < min seq %d", px.me, args.Seq, px.minSeq)
+    reply.Err = Reject
+    return nil
+  }
 
   entry, ok := px.logInstances[args.Seq]
   if !ok {
@@ -331,6 +349,11 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
 
     for !px.dead {
       log.Printf("[px][%d] start a new round, seq %d, n %d\n", px.me, seq, n)
+
+      if seq < px.minSeq {
+        log.Printf("[px][%d] stop current proposal, seq %d < min seq %d", px.me, seq, px.minSeq)
+        return
+      }
 
       func() {
         px.mu.Lock()
@@ -567,8 +590,10 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
   defer px.mu.Unlock()
 
   if seq < px.minSeq {
-    log.Printf("[px][%d] status: seq %d, ignored\n", px.me, seq)
-    return false, nil
+    log.Printf("[px][%d] status: seq %d < min seq %d, ignored\n", px.me, seq, px.minSeq)
+    // the instance has been decided but the log value was removed
+    // the caller is expected to handle the null value
+    return true, nil
   }
 
   entry, ok := px.logInstances[seq]
