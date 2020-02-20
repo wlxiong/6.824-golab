@@ -217,7 +217,7 @@ func (kv *KVPaxos) StartBackgroundWorker() {
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   log.Printf("[kv][%d] GET request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpRead, args.Key, "")
-  log.Printf("[kv][%d] GET committed, seq %d, key %s", kv.me, seq, args.Key)
+  log.Printf("[kv][%d] GET committed %+v, seq %d", kv.me, args, seq)
   pendingRead := kv.MarkPendingReadCommitted(args.ReqId)
   val := <- pendingRead.done
   kv.RemovePendingRead(args.ReqId)
@@ -233,7 +233,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   log.Printf("[kv][%d] PUT request %+v", kv.me, args)
   seq := kv.AppendOp(args.ReqId, OpWrite, args.Key, args.Value)
-  log.Printf("[kv][%d] PUT committed, seq %d, key %s, val %s", kv.me, seq, args.Key, args.Value)
+  log.Printf("[kv][%d] GET committed %+v, seq %d", kv.me, args, seq)
   reply.Err = OK
   return nil
 }

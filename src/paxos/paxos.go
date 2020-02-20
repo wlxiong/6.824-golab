@@ -127,13 +127,13 @@ func (px *Paxos) UpdatePeerSeq(peer int, seq int, done int) {
   }
 
   if minDoneSeq + 1 > px.minSeq {
-    fmt.Printf("update peer [%d] seq: new min seq %d, old min seq %d", px.me, minDoneSeq + 1, px.minSeq)
+    log.Printf("[px][%d] update peer seq: new min seq %d, old min seq %d", px.me, minDoneSeq + 1, px.minSeq)
     px.minSeq = minDoneSeq + 1
     var activeSeqs []int
-    fmt.Printf("update peer [%d] seq: num of logs %d", px.me, len(px.logSeqs))
+    log.Printf("[px][%d] update peer seq: num of logs %d", px.me, len(px.logSeqs))
     for _, s := range px.logSeqs {
       if s < px.minSeq {
-        fmt.Printf("update peer [%d] seq: remove log with seq %d", px.me, s)
+        log.Printf("[px][%d] update peer seq: remove log with seq %d", px.me, s)
         delete(px.logInstances, s)
       } else {
         activeSeqs = append(activeSeqs, s)
@@ -281,7 +281,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
   defer px.mu.Unlock()
 
   if seq < px.minSeq {
-    log.Printf("[px][%d] seq %d is smaller than min seq %d", px.me, seq, px.minSeq)
+    log.Printf("[px][%d] ignore new proposal, seq %d < min seq %d", px.me, seq, px.minSeq)
     return
   }
 
@@ -300,6 +300,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
       panic(fmt.Sprintf("Unknown entry status %v", entry.status))
     }
   } else {
+    log.Printf("[px][%d] add a new entry for %+v, seq %d", px.me, v, seq)
     px.logInstances[seq] = &LogInstance{ seq, -1, -1, -1, nil, Working }
     px.logSeqs = append(px.logSeqs, seq)
   }
@@ -344,7 +345,7 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
 
       args := PrepareArgs { seq, n, px.me, px.doneSeq }
 
-      for _, p := range px.peers {
+      for pi, p := range px.peers {
         _, ok = peerStatus[p]
         if ok {
           continue
@@ -367,10 +368,12 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
           } else if reply.Err == Reject {
             numRejected += 1
           }
+        } else {
+          log.Printf("[px][%d] failed to call Paxos.HandlePrepare of peer %d", px.me, pi)
         }
       }
 
-      log.Printf("[px][%d] prepare: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
+      log.Printf("[px][%d] prepare: seq %d n %d accept %d reject %d peers %d\n", px.me, seq, n, numAccepted, numRejected, numPeers)
 
       commitFailed := false
       if numAccepted > numPeers / 2 {
@@ -412,7 +415,7 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
   args := AcceptArgs { seq, n, v, px.me, px.doneSeq }
   for !px.dead {
 
-    for _, p := range px.peers {
+    for pi, p := range px.peers {
       _, ok := peerStatus[p]
       if ok {
         continue
@@ -431,10 +434,12 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
         } else if reply.Err == Reject {
           numRejected += 1
         }
+      } else {
+        log.Printf("[px][%d] failed to call Paxos.HandleAccept of peer %d", px.me, pi)
       }
     }
 
-    log.Printf("[px][%d] accept: n %d accept %d reject %d peers %d\n", px.me, n, numAccepted, numRejected, numPeers)
+    log.Printf("[px][%d] accept: seq %d n %d accept %d reject %d peers %d\n", px.me, seq, n, numAccepted, numRejected, numPeers)
 
     if numAccepted > numPeers / 2 {
       // success
@@ -456,7 +461,7 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
 
   args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
   for !px.dead && numNotified < numPeers {
-    for _, p := range px.peers {
+    for pi, p := range px.peers {
       err, ok := peerStatus[p]
       if ok && err == OK { continue }
       var reply DecidedReply
@@ -464,6 +469,8 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
       if ok {
         numNotified += 1
         peerStatus[p] = reply.Err
+      } else {
+        log.Printf("[px][%d] failed to call Paxos.HandleDecided of peer %d", px.me, pi)
       }
     }
   }
