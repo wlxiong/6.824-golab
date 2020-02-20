@@ -288,8 +288,9 @@ const (
 )
 
 func (px *Paxos) WaitForSomeMilliseconds(scale int) {
-  // sleepms := rand.Intn(len(px.peers) * 3)
-  sleepms := (len(px.peers) - px.me) * scale
+  numPeers := len(px.peers)
+  sleepms := (rand.Intn(numPeers) + 1) * scale
+  // sleepms := (len(px.peers) - px.me) * scale
   log.Printf("[px][%d] wait for %d ms...\n", px.me, sleepms)
   time.Sleep(time.Duration(sleepms) * time.Millisecond)
 }
@@ -471,6 +472,9 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
       // failure
       return false
     }
+
+    // not decided yet
+    px.WaitForSomeMilliseconds(ShortWait)
   }
 
   return false
@@ -483,7 +487,7 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
   peerStatus := make(map[string]Err)
 
   args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
-  for !px.dead && numNotified < numPeers {
+  for !px.dead {
     for pi, p := range px.peers {
       err, ok := peerStatus[p]
       if ok && err == OK { continue }
@@ -496,6 +500,13 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
         log.Printf("[px][%d] failed to call Paxos.HandleDecided of peer %d", px.me, pi)
       }
     }
+
+    if numNotified >= numPeers {
+      break
+    }
+
+    // not all notified
+    px.WaitForSomeMilliseconds(ShortWait)
   }
 
   return true

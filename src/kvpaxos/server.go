@@ -175,9 +175,9 @@ func (kv *KVPaxos) StartBackgroundWorker() {
         time.Sleep(10 * time.Millisecond)
       }
       log.Printf("[kv][%d] applied seq %d, min uncommitted seq %d", kv.me, kv.applied, uncommitted)
-      for seq := kv.applied + 1; seq <= uncommitted; seq++ {
+      for seq := kv.applied + 1; !kv.dead && seq <= uncommitted; seq++ {
         log.Printf("[kv][%d] wait for operation, seq %d", kv.me, seq)
-        decided, op := kv.WaitLog(seq, 100 * time.Millisecond)
+        decided, op := kv.WaitLog(seq, paxos.LongWait * time.Millisecond)
         log.Printf("[kv][%d] get an operation %+v, decided %v, seq %d", kv.me, op, decided, seq)
         if decided {
           if op.OpType == OpRead {
@@ -211,6 +211,8 @@ func (kv *KVPaxos) StartBackgroundWorker() {
           if seq <= kv.px.Max() {
             log.Printf("[kv][%d] re-propose uncommitted op %+v seq %d", kv.me, op, seq)
             if op == nil {
+              log.Printf("[kv][%d] wait longer before re-proposing null op, seq %d", kv.me, seq)
+              kv.px.WaitForSomeMilliseconds(paxos.LongWait)
               // try to put an empty log entry here to move forward
               kv.px.Start(seq, Op{})
             } else {
