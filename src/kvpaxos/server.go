@@ -53,15 +53,21 @@ type KVPaxos struct {
   pendingRead map[int64]*PendingRead
 }
 
-func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, Op) {
+func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, *Op) {
   start := time.Now()
   sleepms := 10 * time.Millisecond
   maxsleep := time.Second
+
   for !kv.dead {
     decided, val := kv.px.Status(seq)
-    op, _ := val.(Op)
+    var op *Op = nil
+    if val != nil {
+      obj := val.(Op)
+      op = &obj
+    }
+
     if decided {
-        return true, op
+      return true, op
     }
 
     if timeout > 0 {
@@ -83,7 +89,7 @@ func (kv *KVPaxos) WaitLog(seq int, timeout time.Duration) (bool, Op) {
     }
   }
 
-  return false, Op{ -1, OpInvalid, "", "" }
+  return false, nil
 }
 
 func (kv *KVPaxos) AssignNewSeqToNewRequest(reqId int64, opType OpType) int {
@@ -148,8 +154,9 @@ func (kv *KVPaxos) AppendOp(reqId int64, opType OpType, key string, val string) 
   for !kv.dead {
     seq := kv.AssignNewSeqToNewRequest(reqId, opType)
     kv.px.Start(seq, op)
-    ok, committed := kv.WaitLog(seq, 0)
-    if ok && op.ReqId == committed.ReqId {
+    decided, committed := kv.WaitLog(seq, 0)
+    // if it's decided but log entry is nil, the log has been removed
+    if decided && committed != nil && op.ReqId == committed.ReqId {
       return seq
     }
   }
@@ -203,7 +210,12 @@ func (kv *KVPaxos) StartBackgroundWorker() {
           //     the original proposer may have network issue, re-propose it to push forward
           if seq <= kv.px.Max() {
             log.Printf("[kv][%d] re-propose uncommitted op %+v seq %d", kv.me, op, seq)
-            kv.px.Start(seq, op)
+            if op == nil {
+              // try to put an empty log entry here to move forward
+              kv.px.Start(seq, Op{})
+            } else {
+              kv.px.Start(seq, *op)
+            }
           }
           // wait for the same log instance in the next loop
           seq--
