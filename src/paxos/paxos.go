@@ -370,6 +370,8 @@ func (px *Paxos) DoPrepare(seq int, v interface{}) {
       args := PrepareArgs { seq, n, px.me, px.doneSeq }
 
       for pi, p := range px.peers {
+        if px.dead { break }
+
         _, ok = peerStatus[p]
         if ok {
           continue
@@ -440,6 +442,8 @@ func (px *Paxos) DoAccept(seq int, v interface{}, n int) bool {
   for !px.dead {
 
     for pi, p := range px.peers {
+      if px.dead { break }
+
       _, ok := peerStatus[p]
       if ok {
         continue
@@ -489,6 +493,7 @@ func (px *Paxos) DoNotify(seq int, v interface{}, n int) bool {
   args := DecidedArgs { seq, n, v, px.me, px.doneSeq }
   for !px.dead {
     for pi, p := range px.peers {
+      if px.dead { break }
       err, ok := peerStatus[p]
       if ok && err == OK { continue }
       var reply DecidedReply

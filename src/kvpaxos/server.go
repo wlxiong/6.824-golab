@@ -169,7 +169,7 @@ func (kv *KVPaxos) StartBackgroundWorker() {
     writeSeen := make(map[int64]bool)
     for !kv.dead {
       uncommitted := -1
-      for {
+      for !kv.dead {
         uncommitted = kv.GetMinSeqOfUncommittedRead()
         if kv.applied < uncommitted { break }
         time.Sleep(10 * time.Millisecond)
